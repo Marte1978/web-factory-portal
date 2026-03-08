@@ -41,46 +41,72 @@ def slug(nombre: str) -> str:
     return re.sub(r"[^\w]", "_", nombre.lower())[:35]
 
 
+# Exact columns in the companies table (must match schema.sql)
+COMPANY_COLUMNS = {
+    "id", "nombre", "sector", "municipio", "empleados", "telefono", "direccion",
+    "prioridad", "score", "rnc", "url", "calidad_web", "score_web", "chat_ia",
+    "whatsapp", "es_target", "telefonos", "emails", "facebook", "instagram",
+    "linkedin", "twitter", "youtube", "tiktok", "whatsapp_link", "gmaps_url",
+    "gmaps_rating", "gmaps_reviews", "gmaps_hours", "descripcion", "servicios",
+    "titulo_web", "propuesta", "primary_color", "logo_available", "photo_count",
+    "researched", "package_ready", "research_date", "created_at", "updated_at",
+}
+
+
+def clean_row(c: dict, idx: int) -> dict:
+    """Normalize a company dict to match the DB schema exactly."""
+    row = {}
+    for k, v in c.items():
+        if k not in COMPANY_COLUMNS:
+            continue
+        # Nullify empty strings for numeric/bool fields
+        if v == "" or v == "None":
+            v = None
+        row[k] = v
+
+    if "id" not in row or not row["id"]:
+        row["id"] = slug(c.get("nombre", f"company_{idx}"))
+
+    # Type coercions
+    for f in ("researched", "package_ready", "logo_available"):
+        if f in row and row[f] is not None:
+            row[f] = bool(row[f])
+    for f in ("empleados", "score_web", "gmaps_reviews", "photo_count"):
+        if f in row and row[f] is not None:
+            try: row[f] = int(row[f])
+            except (ValueError, TypeError): row[f] = None
+    for f in ("score", "gmaps_rating"):
+        if f in row and row[f] is not None:
+            try: row[f] = float(row[f])
+            except (ValueError, TypeError): row[f] = None
+
+    # Ensure all columns present (fill missing with None so batch rows are uniform)
+    for col in COMPANY_COLUMNS - {"created_at", "updated_at"}:
+        if col not in row:
+            row[col] = None
+    return row
+
+
 def upsert_companies(companies: list) -> int:
     """Upsert list of company dicts into Supabase companies table."""
     ok = 0
-    batch_size = 50
-    for i in range(0, len(companies), batch_size):
-        batch = companies[i:i+batch_size]
-        # Clean batch: remove keys not in schema
-        clean = []
-        for c in batch:
-            row = {k: v for k, v in c.items()
-                   if k not in ("logo", "package_path", "deep_data", "salarios", "propuesta_generada")}
-            # Ensure id exists
-            if "id" not in row:
-                row["id"] = slug(row.get("nombre", f"company_{i}"))
-            # Coerce types
-            for bool_field in ("researched", "package_ready", "logo_available"):
-                if bool_field in row:
-                    row[bool_field] = bool(row[bool_field])
-            for int_field in ("empleados", "score_web", "gmaps_reviews", "photo_count"):
-                if int_field in row and row[int_field] is not None:
-                    try: row[int_field] = int(row[int_field])
-                    except (ValueError, TypeError): row[int_field] = None
-            for float_field in ("score", "gmaps_rating"):
-                if float_field in row and row[float_field] is not None:
-                    try: row[float_field] = float(row[float_field])
-                    except (ValueError, TypeError): row[float_field] = None
-            clean.append(row)
-
+    for i, c in enumerate(companies):
+        row = clean_row(c, i)
         r = requests.post(
             f"{SUPABASE_URL}/rest/v1/companies",
             headers=HEADERS,
-            json=clean,
-            timeout=30,
+            json=row,
+            timeout=20,
         )
         if r.status_code in (200, 201):
-            ok += len(batch)
-            print(f"  Subidas {ok}/{len(companies)} empresas...")
+            ok += 1
+            if ok % 10 == 0:
+                print(f"  Subidas {ok}/{len(companies)}...")
         else:
-            print(f"  ERR upsert batch {i}: {r.status_code} {r.text[:150]}")
-        time.sleep(0.3)
+            nombre = c.get("nombre","?")[:30]
+            print(f"  ERR {nombre}: {r.status_code} {r.text[:100]}")
+        time.sleep(0.05)
+    print(f"  Total: {ok}/{len(companies)} empresas subidas")
     return ok
 
 
