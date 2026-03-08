@@ -1,10 +1,10 @@
-"""Cloud-aware config — overrides local paths when running on Render/Railway."""
+"""Cloud-aware config — Vercel + Supabase deployment."""
 import os
 from pathlib import Path
 
-IS_CLOUD = os.getenv("RENDER") == "true" or os.getenv("RAILWAY_ENVIRONMENT") is not None
+IS_CLOUD = os.getenv("VERCEL") == "1" or os.getenv("VERCEL_ENV") is not None
 
-# Base dir: use /tmp on cloud, local path in dev
+# Base dir: use /tmp on Vercel (serverless), local path in dev
 if IS_CLOUD:
     BASE_DIR     = Path("/tmp/webfactory")
     PACKAGES_DIR = BASE_DIR / "packages"
