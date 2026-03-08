@@ -1,0 +1,808 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Web Factory Portal</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root { --primary:#1d4ed8; --success:#16a34a; --danger:#dc2626; --warn:#d97706; }
+  body  { background:#0f172a; color:#e2e8f0; font-family:'Inter',sans-serif; }
+  .card { background:#1e293b; border:1px solid #334155; }
+  .badge-sin   { background:#7f1d1d; color:#fca5a5; }
+  .badge-caida { background:#7c2d12; color:#fdba74; }
+  .badge-basica{ background:#78350f; color:#fcd34d; }
+  .badge-inter { background:#3b0764; color:#d8b4fe; }
+  .badge-buena { background:#14532d; color:#86efac; }
+  .badge-prof  { background:#1e3a8a; color:#93c5fd; }
+  .badge-target{ background:#14532d; color:#86efac; }
+  .badge-no    { background:#450a0a; color:#fca5a5; }
+  .badge-alta  { background:#1e3a8a; color:#93c5fd; }
+  .badge-media { background:#78350f; color:#fcd34d; }
+  .progress-bar { transition: width 0.4s ease; }
+  .log-terminal { background:#0a0f1a; border:1px solid #1e40af; font-family:monospace; }
+  .drawer { transform: translateX(100%); transition: transform 0.3s ease; }
+  .drawer.open { transform: translateX(0); }
+  .color-swatch { width:28px; height:28px; border-radius:6px; display:inline-block; border:2px solid #334155; }
+  ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:#1e293b; }
+  ::-webkit-scrollbar-thumb { background:#475569; border-radius:3px; }
+  .stat-card { background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border:1px solid #334155; }
+  .btn-primary { background:#1d4ed8; } .btn-primary:hover { background:#1e40af; }
+  .btn-green   { background:#16a34a; } .btn-green:hover   { background:#15803d; }
+  .btn-gray    { background:#334155; } .btn-gray:hover    { background:#475569; }
+  input,select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; }
+  input:focus,select:focus { outline:none; border-color:#1d4ed8; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<!-- HEADER -->
+<header class="sticky top-0 z-40 border-b border-slate-700" style="background:#0f172a;">
+  <div class="max-w-screen-2xl mx-auto px-4 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <div class="text-2xl">🏭</div>
+      <div>
+        <h1 class="text-lg font-bold text-white">Web Factory Portal</h1>
+        <p class="text-xs text-slate-400">Prospect Research & Brief Generator</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button onclick="loadExcel()" class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
+        📂 Cargar Excel
+      </button>
+      <button onclick="researchAll()" id="btn-all"
+              class="btn-green text-sm px-4 py-1.5 rounded-lg text-white font-semibold transition">
+        ⚡ Investigar Todos
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- STATS BAR -->
+<div class="max-w-screen-2xl mx-auto px-4 py-4">
+  <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-3" id="stats-bar">
+    <div class="stat-card rounded-xl p-3 col-span-1">
+      <p class="text-xs text-slate-400">Total</p>
+      <p class="text-2xl font-bold text-white" id="s-total">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Targets</p>
+      <p class="text-2xl font-bold text-green-400" id="s-targets">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Sin Web</p>
+      <p class="text-2xl font-bold text-red-400" id="s-sinweb">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Web Básica</p>
+      <p class="text-2xl font-bold text-yellow-400" id="s-basica">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Chat IA</p>
+      <p class="text-2xl font-bold text-blue-400" id="s-chat">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Investigadas</p>
+      <p class="text-2xl font-bold text-purple-400" id="s-researched">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Paquetes</p>
+      <p class="text-2xl font-bold text-cyan-400" id="s-packages">—</p>
+    </div>
+    <div class="stat-card rounded-xl p-3">
+      <p class="text-xs text-slate-400">Alta Prior.</p>
+      <p class="text-2xl font-bold text-indigo-400" id="s-alta">—</p>
+    </div>
+  </div>
+</div>
+
+<!-- FILTERS -->
+<div class="max-w-screen-2xl mx-auto px-4 pb-3">
+  <div class="card rounded-xl p-3 flex flex-wrap gap-2 items-center">
+    <input type="text" id="f-search" placeholder="🔍 Buscar empresa..."
+           class="rounded-lg px-3 py-1.5 text-sm w-56 transition" oninput="applyFilters()">
+    <select id="f-sector" class="rounded-lg px-3 py-1.5 text-sm transition" onchange="applyFilters()">
+      <option value="">Todos los sectores</option>
+    </select>
+    <select id="f-calidad" class="rounded-lg px-3 py-1.5 text-sm transition" onchange="applyFilters()">
+      <option value="">Toda calidad web</option>
+      <option>SIN WEB</option><option>CAIDA</option><option>BASICA</option>
+      <option>INTERMEDIA</option><option>BUENA</option><option>PROFESIONAL</option>
+    </select>
+    <label class="flex items-center gap-1.5 text-sm cursor-pointer">
+      <input type="checkbox" id="f-target" onchange="applyFilters()" class="accent-green-500">
+      <span class="text-slate-300">Solo Targets</span>
+    </label>
+    <label class="flex items-center gap-1.5 text-sm cursor-pointer">
+      <input type="checkbox" id="f-pkg" onchange="applyFilters()" class="accent-cyan-500">
+      <span class="text-slate-300">Con Paquete</span>
+    </label>
+    <div class="ml-auto flex gap-2">
+      <button onclick="setView('cards')" id="btn-cards"
+              class="btn-primary text-xs px-3 py-1.5 rounded-lg text-white transition">⊞ Cards</button>
+      <button onclick="setView('table')" id="btn-table"
+              class="btn-gray text-xs px-3 py-1.5 rounded-lg text-slate-300 transition">☰ Tabla</button>
+    </div>
+    <span class="text-xs text-slate-500" id="result-count"></span>
+  </div>
+</div>
+
+<!-- MAIN CONTENT -->
+<div class="max-w-screen-2xl mx-auto px-4 pb-20">
+
+  <!-- CARDS VIEW -->
+  <div id="view-cards" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4"></div>
+
+  <!-- TABLE VIEW -->
+  <div id="view-table" class="hidden overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-slate-400 border-b border-slate-700 text-left">
+          <th class="py-2 px-3">Empresa</th>
+          <th class="py-2 px-3">Sector</th>
+          <th class="py-2 px-3">Emp.</th>
+          <th class="py-2 px-3">Web</th>
+          <th class="py-2 px-3">Chat</th>
+          <th class="py-2 px-3">Target</th>
+          <th class="py-2 px-3">Teléfono</th>
+          <th class="py-2 px-3">Acciones</th>
+        </tr>
+      </thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- DRAWER (right panel) -->
+<div id="drawer" class="drawer fixed top-0 right-0 h-full w-full sm:w-[520px] z-50
+                        shadow-2xl flex flex-col" style="background:#0f172a; border-left:1px solid #334155;">
+  <div class="flex items-center justify-between p-4 border-b border-slate-700">
+    <div>
+      <h2 class="font-bold text-white text-lg" id="drawer-title">Empresa</h2>
+      <p class="text-xs text-slate-400" id="drawer-subtitle"></p>
+    </div>
+    <button onclick="closeDrawer()" class="text-slate-400 hover:text-white text-2xl leading-none">✕</button>
+  </div>
+
+  <!-- Tabs -->
+  <div class="flex border-b border-slate-700">
+    <button onclick="showTab('research')" class="tab-btn px-4 py-2 text-sm font-medium
+            border-b-2 border-blue-500 text-blue-400" data-tab="research">🔍 Investigación</button>
+    <button onclick="showTab('brief')" class="tab-btn px-4 py-2 text-sm font-medium
+            border-b-2 border-transparent text-slate-400 hover:text-white" data-tab="brief">📄 Brief</button>
+    <button onclick="showTab('assets')" class="tab-btn px-4 py-2 text-sm font-medium
+            border-b-2 border-transparent text-slate-400 hover:text-white" data-tab="assets">🎨 Assets</button>
+  </div>
+
+  <div class="flex-1 overflow-y-auto">
+
+    <!-- TAB: Research -->
+    <div id="tab-research" class="p-4 space-y-4">
+      <!-- Progress -->
+      <div id="research-progress" class="hidden">
+        <div class="flex justify-between text-xs text-slate-400 mb-1">
+          <span id="progress-step">Iniciando...</span>
+          <span id="progress-pct">0%</span>
+        </div>
+        <div class="w-full bg-slate-700 rounded-full h-2">
+          <div id="progress-bar" class="progress-bar bg-blue-500 h-2 rounded-full" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Log Terminal -->
+      <div class="log-terminal rounded-xl p-3 h-64 overflow-y-auto text-xs" id="log-output">
+        <p class="text-slate-500">Haz clic en "Investigar" para iniciar...</p>
+      </div>
+
+      <!-- Company quick info -->
+      <div id="company-info" class="space-y-2 text-sm"></div>
+
+      <!-- Action buttons -->
+      <div class="flex gap-2">
+        <button id="btn-research" onclick="startResearch()"
+                class="btn-primary flex-1 py-2 rounded-xl text-white text-sm font-semibold transition">
+          🔍 Investigar
+        </button>
+        <button id="btn-download" onclick="downloadPackage()" disabled
+                class="btn-gray flex-1 py-2 rounded-xl text-slate-300 text-sm font-semibold transition opacity-50">
+          ⬇ Descargar ZIP
+        </button>
+      </div>
+    </div>
+
+    <!-- TAB: Brief -->
+    <div id="tab-brief" class="hidden p-4">
+      <div id="brief-content" class="prose prose-invert prose-sm max-w-none">
+        <p class="text-slate-400 text-sm">El brief se genera al investigar la empresa.</p>
+      </div>
+    </div>
+
+    <!-- TAB: Assets -->
+    <div id="tab-assets" class="hidden p-4 space-y-4">
+      <!-- Logo -->
+      <div>
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Logo</h3>
+        <div id="assets-logo" class="w-24 h-24 rounded-xl border border-slate-600 bg-slate-800
+                                     flex items-center justify-center overflow-hidden">
+          <span class="text-4xl" id="logo-placeholder">🏢</span>
+        </div>
+      </div>
+      <!-- Colors -->
+      <div>
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Paleta de Colores</h3>
+        <div id="color-palette" class="flex gap-2 flex-wrap"></div>
+      </div>
+      <!-- Photos -->
+      <div>
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Fotos del Sitio</h3>
+        <div id="photo-grid" class="grid grid-cols-3 gap-2"></div>
+      </div>
+      <!-- Redes -->
+      <div>
+        <h3 class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Redes Sociales</h3>
+        <div id="socials-list" class="space-y-1 text-sm"></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- BATCH MODAL -->
+<div id="batch-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,.7)">
+  <div class="card rounded-2xl p-6 w-full max-w-md mx-4">
+    <h2 class="text-lg font-bold text-white mb-4">⚡ Investigar Todos</h2>
+    <p class="text-sm text-slate-400 mb-4" id="batch-info">Investigando <span id="batch-current">0</span> / <span id="batch-total">0</span> empresas...</p>
+    <div class="w-full bg-slate-700 rounded-full h-3 mb-4">
+      <div id="batch-bar" class="progress-bar bg-green-500 h-3 rounded-full" style="width:0%"></div>
+    </div>
+    <div class="log-terminal rounded-lg p-3 h-40 overflow-y-auto text-xs" id="batch-log"></div>
+    <button onclick="closeBatchModal()" class="btn-gray w-full mt-4 py-2 rounded-xl text-sm text-slate-300">
+      Cerrar (sigue en segundo plano)
+    </button>
+  </div>
+</div>
+
+<!-- OVERLAY -->
+<div id="overlay" onclick="closeDrawer()" class="hidden fixed inset-0 z-40" style="background:rgba(0,0,0,.5)"></div>
+
+<script>
+// ─── State ────────────────────────────────────────────────────────────────────
+let allCompanies = [];
+let filtered     = [];
+let currentView  = 'cards';
+let activeCompany = null;
+let activeES     = null;
+
+// ─── Boot ─────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  fetchStats();
+  fetchCompanies();
+  setInterval(fetchStats, 30000);
+});
+
+// ─── API helpers ──────────────────────────────────────────────────────────────
+async function api(path, opts={}) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+
+// ─── Stats ────────────────────────────────────────────────────────────────────
+async function fetchStats() {
+  try {
+    const s = await api('/api/stats');
+    document.getElementById('s-total').textContent     = s.total;
+    document.getElementById('s-targets').textContent   = s.targets;
+    document.getElementById('s-sinweb').textContent    = s.sin_web;
+    document.getElementById('s-basica').textContent    = s.basica;
+    document.getElementById('s-chat').textContent      = s.con_chat_ia;
+    document.getElementById('s-researched').textContent= s.researched;
+    document.getElementById('s-packages').textContent  = s.packages;
+    document.getElementById('s-alta').textContent      = s.alta_prioridad;
+  } catch(e) {}
+}
+
+// ─── Companies ────────────────────────────────────────────────────────────────
+async function fetchCompanies() {
+  try {
+    allCompanies = await api('/api/companies');
+    populateSectorFilter();
+    applyFilters();
+  } catch(e) {
+    console.error(e);
+  }
+}
+
+function populateSectorFilter() {
+  const sectors = [...new Set(allCompanies.map(c => c.sector).filter(Boolean))].sort();
+  const sel = document.getElementById('f-sector');
+  sectors.forEach(s => {
+    const o = document.createElement('option');
+    o.value = s; o.textContent = s;
+    sel.appendChild(o);
+  });
+}
+
+function applyFilters() {
+  const q       = document.getElementById('f-search').value.toLowerCase();
+  const sector  = document.getElementById('f-sector').value;
+  const calidad = document.getElementById('f-calidad').value;
+  const target  = document.getElementById('f-target').checked;
+  const pkg     = document.getElementById('f-pkg').checked;
+
+  filtered = allCompanies.filter(c => {
+    if (q && !c.nombre?.toLowerCase().includes(q) && !c.sector?.toLowerCase().includes(q)) return false;
+    if (sector  && c.sector     !== sector)  return false;
+    if (calidad && c.calidad_web !== calidad) return false;
+    if (target  && c.es_target  !== 'SI')    return false;
+    if (pkg     && !c.package_ready)         return false;
+    return true;
+  });
+
+  document.getElementById('result-count').textContent = `${filtered.length} empresas`;
+  renderView();
+}
+
+// ─── Views ────────────────────────────────────────────────────────────────────
+function setView(v) {
+  currentView = v;
+  document.getElementById('view-cards').classList.toggle('hidden', v !== 'cards');
+  document.getElementById('view-table').classList.toggle('hidden', v !== 'table');
+  document.getElementById('btn-cards').className = v === 'cards'
+    ? 'btn-primary text-xs px-3 py-1.5 rounded-lg text-white transition'
+    : 'btn-gray text-xs px-3 py-1.5 rounded-lg text-slate-300 transition';
+  document.getElementById('btn-table').className = v === 'table'
+    ? 'btn-primary text-xs px-3 py-1.5 rounded-lg text-white transition'
+    : 'btn-gray text-xs px-3 py-1.5 rounded-lg text-slate-300 transition';
+  renderView();
+}
+
+function renderView() {
+  if (currentView === 'cards') renderCards();
+  else renderTable();
+}
+
+// ─── Badge helpers ────────────────────────────────────────────────────────────
+function calBadge(c) {
+  const map = {
+    'SIN WEB':'badge-sin','CAIDA':'badge-caida','BASICA':'badge-basica',
+    'INTERMEDIA':'badge-inter','BUENA':'badge-buena','PROFESIONAL':'badge-prof'
+  };
+  const cls = map[c] || 'badge-gray';
+  return `<span class="${cls} text-xs px-2 py-0.5 rounded-full font-semibold">${c||'?'}</span>`;
+}
+function targetBadge(t) {
+  return t === 'SI'
+    ? `<span class="badge-target text-xs px-2 py-0.5 rounded-full font-semibold">TARGET</span>`
+    : `<span class="badge-no text-xs px-2 py-0.5 rounded-full font-semibold">NO TARGET</span>`;
+}
+function prioBadge(p) {
+  return p === 'ALTA'
+    ? `<span class="badge-alta text-xs px-2 py-0.5 rounded-full">ALTA</span>`
+    : `<span class="badge-media text-xs px-2 py-0.5 rounded-full">MEDIA</span>`;
+}
+
+// ─── Card render ──────────────────────────────────────────────────────────────
+function renderCards() {
+  const el = document.getElementById('view-cards');
+  el.innerHTML = '';
+  filtered.forEach(c => el.appendChild(makeCard(c)));
+}
+
+function makeCard(c) {
+  const div = document.createElement('div');
+  div.className = 'card rounded-2xl p-4 flex flex-col gap-3 relative overflow-hidden';
+  div.id = `card-${c.id}`;
+
+  const logoHtml = c.package_ready
+    ? `<img src="/api/packages/${c.id}/logo" class="w-10 h-10 rounded-lg object-cover bg-slate-700"
+            onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
+    : '';
+
+  div.innerHTML = `
+    <!-- Progress overlay -->
+    <div id="prog-${c.id}" class="hidden absolute top-0 left-0 right-0">
+      <div class="bg-slate-700 h-1"><div id="pbar-${c.id}" class="progress-bar bg-blue-500 h-1" style="width:0%"></div></div>
+    </div>
+
+    <!-- Top row -->
+    <div class="flex items-start justify-between gap-2">
+      <div class="flex items-center gap-2">
+        ${logoHtml}
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold text-slate-300"
+             style="background:#1e3a8a; display:${c.package_ready ? 'none' : 'flex'}">
+          ${(c.nombre||'?')[0]}
+        </div>
+        <div>
+          ${calBadge(c.calidad_web)}
+          <span class="ml-1">${targetBadge(c.es_target)}</span>
+        </div>
+      </div>
+      ${prioBadge(c.prioridad)}
+    </div>
+
+    <!-- Name -->
+    <h3 class="font-bold text-white text-sm leading-tight line-clamp-2">${c.nombre}</h3>
+
+    <!-- Meta -->
+    <div class="text-xs text-slate-400 space-y-0.5">
+      <p>📂 ${c.sector||'—'}</p>
+      <p>📍 ${c.municipio||'—'} &bull; 👥 ${c.empleados||'—'} emp</p>
+      ${c.telefono ? `<p>📞 ${c.telefono}</p>` : ''}
+      ${c.url && c.url.startsWith('http') ? `<p class="truncate">🌐 <a href="${c.url}" target="_blank" class="text-blue-400 hover:underline">${new URL(c.url).hostname}</a></p>` : ''}
+    </div>
+
+    <!-- Proposal snippet -->
+    ${c.propuesta ? `<p class="text-xs text-slate-500 line-clamp-2 italic">${c.propuesta}</p>` : ''}
+
+    <!-- Status log line -->
+    <div id="log-${c.id}" class="hidden text-xs text-blue-400 font-mono truncate"></div>
+
+    <!-- Color bar if package ready -->
+    ${c.package_ready && c.primary_color
+      ? `<div class="flex gap-1">${(c.palette||[c.primary_color]).slice(0,5).map(col=>`<div class="color-swatch" style="background:${col}" title="${col}"></div>`).join('')}</div>`
+      : ''}
+
+    <!-- Buttons -->
+    <div class="flex gap-2 mt-auto pt-1">
+      <button onclick="openDrawer('${c.id}')"
+              class="btn-primary flex-1 py-1.5 rounded-xl text-xs text-white font-semibold transition">
+        ${c.researched ? '📄 Ver Brief' : '🔍 Investigar'}
+      </button>
+      ${c.package_ready
+        ? `<button onclick="downloadPkg('${c.id}')"
+                   class="btn-gray px-3 py-1.5 rounded-xl text-xs text-slate-300 transition" title="Descargar ZIP">⬇</button>`
+        : ''}
+    </div>
+  `;
+  return div;
+}
+
+// ─── Table render ─────────────────────────────────────────────────────────────
+function renderTable() {
+  const tbody = document.getElementById('table-body');
+  tbody.innerHTML = '';
+  filtered.forEach((c, i) => {
+    const tr = document.createElement('tr');
+    tr.className = i % 2 === 0 ? 'border-b border-slate-800' : 'border-b border-slate-800 bg-slate-900';
+    tr.innerHTML = `
+      <td class="py-2 px-3">
+        <span class="font-semibold text-white text-sm">${c.nombre}</span>
+        <br><span class="text-xs text-slate-500">${c.municipio||''}</span>
+      </td>
+      <td class="py-2 px-3 text-xs text-slate-400">${c.sector||''}</td>
+      <td class="py-2 px-3 text-xs text-center">${c.empleados||''}</td>
+      <td class="py-2 px-3">${calBadge(c.calidad_web)}</td>
+      <td class="py-2 px-3 text-xs text-center ${c.chat_ia==='SI'?'text-green-400':'text-red-400'}">${c.chat_ia||'?'}</td>
+      <td class="py-2 px-3">${targetBadge(c.es_target)}</td>
+      <td class="py-2 px-3 text-xs text-slate-400">${c.telefono||''}</td>
+      <td class="py-2 px-3">
+        <button onclick="openDrawer('${c.id}')"
+                class="btn-primary text-xs px-3 py-1 rounded-lg text-white transition">
+          ${c.researched ? '📄 Brief' : '🔍 Investigar'}
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
+// ─── Drawer ───────────────────────────────────────────────────────────────────
+async function openDrawer(cid) {
+  activeCompany = allCompanies.find(c => c.id === cid);
+  if (!activeCompany) return;
+
+  document.getElementById('drawer-title').textContent   = activeCompany.nombre;
+  document.getElementById('drawer-subtitle').textContent = `${activeCompany.sector} · ${activeCompany.municipio}`;
+
+  // Reset tabs
+  showTab('research');
+
+  // Company info panel
+  const info = document.getElementById('company-info');
+  info.innerHTML = `
+    <div class="grid grid-cols-2 gap-2 text-xs">
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Calidad Web</span><br>${calBadge(activeCompany.calidad_web)}</div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Target</span><br>${targetBadge(activeCompany.es_target)}</div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Empleados</span><br><span class="text-white font-semibold">${activeCompany.empleados}</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Chat IA</span><br><span class="${activeCompany.chat_ia==='SI'?'text-green-400':'text-red-400'} font-semibold">${activeCompany.chat_ia||'?'}</span></div>
+    </div>
+    ${activeCompany.telefonos ? `<p class="text-xs text-slate-300">📞 ${activeCompany.telefonos}</p>` : ''}
+    ${activeCompany.emails    ? `<p class="text-xs text-slate-300">✉️ ${activeCompany.emails}</p>` : ''}
+    ${activeCompany.url       ? `<p class="text-xs"><a href="${activeCompany.url}" target="_blank" class="text-blue-400 hover:underline truncate block">🌐 ${activeCompany.url}</a></p>` : ''}
+    ${activeCompany.propuesta ? `<div class="bg-slate-800 rounded-lg p-2 text-xs text-slate-300 italic">${activeCompany.propuesta}</div>` : ''}
+  `;
+
+  // Log reset
+  const log = document.getElementById('log-output');
+  log.innerHTML = '<p class="text-slate-500">Listo para investigar...</p>';
+  document.getElementById('research-progress').classList.add('hidden');
+  document.getElementById('progress-bar').style.width = '0%';
+
+  // Download button
+  document.getElementById('btn-download').disabled = !activeCompany.package_ready;
+  document.getElementById('btn-download').classList.toggle('opacity-50', !activeCompany.package_ready);
+
+  // If package exists, load assets
+  if (activeCompany.package_ready) {
+    loadAssets(cid);
+    loadBrief(cid);
+  }
+
+  document.getElementById('drawer').classList.add('open');
+  document.getElementById('overlay').classList.remove('hidden');
+}
+
+function closeDrawer() {
+  document.getElementById('drawer').classList.remove('open');
+  document.getElementById('overlay').classList.add('hidden');
+  activeCompany = null;
+}
+
+function showTab(tab) {
+  ['research','brief','assets'].forEach(t => {
+    document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
+  });
+  document.querySelectorAll('.tab-btn').forEach(btn => {
+    const active = btn.dataset.tab === tab;
+    btn.className = `tab-btn px-4 py-2 text-sm font-medium border-b-2 transition ${
+      active ? 'border-blue-500 text-blue-400' : 'border-transparent text-slate-400 hover:text-white'
+    }`;
+  });
+}
+
+// ─── Research ─────────────────────────────────────────────────────────────────
+async function startResearch() {
+  if (!activeCompany) return;
+  const cid = activeCompany.id;
+  const log = document.getElementById('log-output');
+  log.innerHTML = '';
+
+  // Show progress
+  document.getElementById('research-progress').classList.remove('hidden');
+  document.getElementById('btn-research').disabled = true;
+  document.getElementById('btn-research').textContent = '⏳ Investigando...';
+
+  // Show card progress bar
+  const progCard = document.getElementById(`prog-${cid}`);
+  if (progCard) progCard.classList.remove('hidden');
+
+  try {
+    const {job_id} = await api(`/api/research/${cid}`, {method:'POST'});
+    if (activeES) activeES.close();
+
+    activeES = new EventSource(`/api/stream/${job_id}`);
+
+    activeES.addEventListener('progress', e => {
+      const d = JSON.parse(e.data);
+      addLog(log, d.msg, d.step);
+      updateProgress(d.pct || 0, d.msg);
+      const pbar = document.getElementById(`pbar-${cid}`);
+      if (pbar) pbar.style.width = (d.pct||0) + '%';
+      const logLine = document.getElementById(`log-${cid}`);
+      if (logLine) { logLine.classList.remove('hidden'); logLine.textContent = d.msg; }
+    });
+
+    activeES.addEventListener('done', e => {
+      activeES.close();
+      const d = JSON.parse(e.data);
+      addLog(log, '✓ Investigacion completada!', 'done');
+      updateProgress(100, 'Completado');
+
+      // Update company in memory
+      const idx = allCompanies.findIndex(c => c.id === cid);
+      if (idx >= 0) {
+        allCompanies[idx] = {...allCompanies[idx], ...d, researched:true, package_ready:true};
+        activeCompany = allCompanies[idx];
+      }
+
+      document.getElementById('btn-research').textContent = '✓ Investigada';
+      document.getElementById('btn-download').disabled = false;
+      document.getElementById('btn-download').classList.remove('opacity-50');
+
+      // Reload card
+      const card = document.getElementById(`card-${cid}`);
+      if (card) card.replaceWith(makeCard(allCompanies[idx]));
+
+      loadAssets(cid);
+      loadBrief(cid);
+      fetchStats();
+    });
+
+    activeES.addEventListener('error', e => {
+      const d = JSON.parse(e.data || '{}');
+      addLog(log, `Error: ${d.msg||'conexion perdida'}`, 'error');
+      activeES.close();
+      document.getElementById('btn-research').disabled = false;
+      document.getElementById('btn-research').textContent = '🔍 Reintentar';
+    });
+
+  } catch(err) {
+    addLog(log, `Error: ${err.message}`, 'error');
+    document.getElementById('btn-research').disabled = false;
+    document.getElementById('btn-research').textContent = '🔍 Investigar';
+  }
+}
+
+function addLog(container, msg, type='info') {
+  const colors = {
+    done:'text-green-400', error:'text-red-400', logo:'text-yellow-400',
+    colors:'text-purple-400', images:'text-cyan-400', brief:'text-blue-400',
+  };
+  const cls = colors[type] || 'text-slate-300';
+  const ts  = new Date().toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const p   = document.createElement('p');
+  p.className = cls;
+  p.textContent = `[${ts}] ${msg}`;
+  container.appendChild(p);
+  container.scrollTop = container.scrollHeight;
+}
+
+function updateProgress(pct, msg) {
+  document.getElementById('progress-bar').style.width = pct + '%';
+  document.getElementById('progress-pct').textContent  = pct + '%';
+  document.getElementById('progress-step').textContent = msg;
+}
+
+// ─── Assets ───────────────────────────────────────────────────────────────────
+async function loadAssets(cid) {
+  try {
+    const pkg = await api(`/api/packages/${cid}`);
+
+    // Logo
+    const logoDiv = document.getElementById('assets-logo');
+    logoDiv.innerHTML = pkg.has_logo
+      ? `<img src="/api/packages/${cid}/logo?t=${Date.now()}" class="w-full h-full object-contain p-2">`
+      : `<span class="text-4xl">🏢</span>`;
+
+    // Colors
+    const palette = document.getElementById('color-palette');
+    palette.innerHTML = '';
+    if (pkg.colors?.palette) {
+      pkg.colors.palette.forEach(hex => {
+        const sw = document.createElement('div');
+        sw.className = 'color-swatch cursor-pointer';
+        sw.style.background = hex;
+        sw.title = hex;
+        sw.onclick = () => navigator.clipboard.writeText(hex);
+        palette.appendChild(sw);
+      });
+      const label = document.createElement('p');
+      label.className = 'text-xs text-slate-500 mt-1 w-full';
+      label.textContent = `Primario: ${pkg.colors.dominant} · Clic para copiar`;
+      palette.appendChild(label);
+    }
+
+    // Photos
+    const grid = document.getElementById('photo-grid');
+    grid.innerHTML = '';
+    pkg.images.forEach(img => {
+      const div = document.createElement('div');
+      div.className = 'rounded-lg overflow-hidden bg-slate-800 aspect-square';
+      div.innerHTML = `<img src="/api/packages/${cid}/images/${img}" class="w-full h-full object-cover"
+                            onerror="this.parentElement.innerHTML='<span class=text-slate-600 text-xs p-2>Sin imagen</span>'">`;
+      grid.appendChild(div);
+    });
+    if (pkg.images.length === 0) {
+      grid.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No se encontraron fotos</p>';
+    }
+
+    // Socials
+    const sl = document.getElementById('socials-list');
+    const content = pkg.content || {};
+    const socials = content.social_media || {};
+    sl.innerHTML = Object.entries(socials).filter(([,v]) => v).map(([k,v]) =>
+      `<a href="${v}" target="_blank" class="text-blue-400 hover:underline text-xs block">${k}: ${v}</a>`
+    ).join('') || '<p class="text-xs text-slate-500">No se encontraron redes sociales</p>';
+
+  } catch(e) {}
+}
+
+async function loadBrief(cid) {
+  try {
+    const pkg  = await api(`/api/packages/${cid}`);
+    const div  = document.getElementById('brief-content');
+    if (pkg.brief) {
+      // Simple markdown -> HTML (headings + lists)
+      let html = pkg.brief
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold text-white mt-4 mb-1">$1</h2>')
+        .replace(/^### (.+)$/gm,'<h3 class="text-sm font-semibold text-blue-300 mt-3 mb-1">$1</h3>')
+        .replace(/^# (.+)$/gm,  '<h1 class="text-lg font-bold text-white mb-2">$1</h1>')
+        .replace(/\*\*(.+?)\*\*/g,'<strong class="text-white">$1</strong>')
+        .replace(/^- (.+)$/gm,   '<li class="text-slate-300 text-xs ml-3">$1</li>')
+        .replace(/^> (.+)$/gm,   '<blockquote class="border-l-2 border-blue-500 pl-2 text-slate-400 text-xs italic">$1</blockquote>')
+        .replace(/\n\n/g,        '<br>')
+        .replace(/---/g,         '<hr class="border-slate-600 my-3">');
+      div.innerHTML = `<div class="text-xs text-slate-300 space-y-1">${html}</div>`;
+    }
+  } catch(e) {}
+}
+
+// ─── Download ─────────────────────────────────────────────────────────────────
+function downloadPackage() {
+  if (!activeCompany) return;
+  downloadPkg(activeCompany.id);
+}
+function downloadPkg(cid) {
+  window.open(`/api/packages/${cid}/download`, '_blank');
+}
+
+// ─── Load Excel ───────────────────────────────────────────────────────────────
+async function loadExcel() {
+  const path = prompt('Ruta del archivo Excel:', 'C:\\Users\\Willy\\OneDrive\\Escritorio\\INVESTIGACION_100_EMPRESAS.xlsx');
+  if (!path) return;
+  try {
+    const r = await api('/api/load-excel', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({path})
+    });
+    alert(`✓ ${r.loaded} empresas cargadas (total: ${r.total})`);
+    await fetchCompanies();
+    await fetchStats();
+  } catch(e) {
+    alert('Error: ' + e.message);
+  }
+}
+
+// ─── Research All ─────────────────────────────────────────────────────────────
+async function researchAll() {
+  const pending = allCompanies.filter(c => !c.researched).map(c => c.id);
+  if (pending.length === 0) { alert('Todas las empresas ya fueron investigadas.'); return; }
+  if (!confirm(`Investigar ${pending.length} empresas. Esto tardará ~${Math.ceil(pending.length*4/60)} minutos. ¿Continuar?`)) return;
+
+  document.getElementById('batch-modal').classList.remove('hidden');
+  document.getElementById('batch-total').textContent   = pending.length;
+  document.getElementById('batch-current').textContent = '0';
+  const batchLog = document.getElementById('batch-log');
+  batchLog.innerHTML = '';
+
+  try {
+    const {job_id, count} = await api('/api/research/batch', {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(pending)
+    });
+
+    const es = new EventSource(`/api/stream/${job_id}`);
+    let done = 0;
+
+    es.addEventListener('progress', e => {
+      const d = JSON.parse(e.data);
+      if (d.batch_progress) {
+        const [curr, tot] = d.batch_progress.split('/');
+        document.getElementById('batch-current').textContent = curr;
+        document.getElementById('batch-bar').style.width = Math.round(parseInt(curr)/parseInt(tot)*100) + '%';
+      }
+      if (d.step === 'done' || d.step === 'start') {
+        const p = document.createElement('p');
+        p.className = d.step === 'done' ? 'text-green-400' : 'text-slate-300';
+        p.textContent = `[${new Date().toLocaleTimeString()}] ${d.msg || d.nombre || ''}`;
+        batchLog.appendChild(p);
+        batchLog.scrollTop = batchLog.scrollHeight;
+        done++;
+      }
+    });
+
+    es.addEventListener('batch_done', e => {
+      es.close();
+      const p = document.createElement('p');
+      p.className = 'text-green-400 font-bold';
+      p.textContent = '✓ Todos completados!';
+      batchLog.appendChild(p);
+      fetchCompanies();
+      fetchStats();
+    });
+
+    es.onerror = () => es.close();
+
+  } catch(err) {
+    alert('Error: ' + err.message);
+  }
+}
+
+function closeBatchModal() {
+  document.getElementById('batch-modal').classList.add('hidden');
+}
+</script>
+</body>
+</html>
