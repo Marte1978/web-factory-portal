@@ -4,7 +4,11 @@ pages:
   stage: deploy
   script:
     - mkdir -p public
-    - cp docs/index.html public/index.html
+    # Portal principal (dashboard con Supabase)
+    - cp portal/static/index.html public/index.html
+    # Landing page en /landing/
+    - mkdir -p public/landing
+    - cp docs/index.html public/landing/index.html
   artifacts:
     paths:
       - public

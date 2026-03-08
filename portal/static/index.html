@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Web Factory Portal</title>
 <script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 <style>
   :root { --primary:#1d4ed8; --success:#16a34a; --danger:#dc2626; --warn:#d97706; }
   body  { background:#0f172a; color:#e2e8f0; font-family:'Inter',sans-serif; }
@@ -32,6 +34,15 @@
   .btn-gray    { background:#334155; } .btn-gray:hover    { background:#475569; }
   input,select { background:#0f172a; border:1px solid #334155; color:#e2e8f0; }
   input:focus,select:focus { outline:none; border-color:#1d4ed8; }
+  .prose-brief h1 { font-size:1.1rem; font-weight:700; color:#fff; margin:0.75rem 0 0.5rem; }
+  .prose-brief h2 { font-size:0.95rem; font-weight:700; color:#fff; margin:1rem 0 0.35rem; }
+  .prose-brief h3 { font-size:0.85rem; font-weight:600; color:#93c5fd; margin:0.75rem 0 0.25rem; }
+  .prose-brief p  { font-size:0.75rem; color:#cbd5e1; margin:0.25rem 0; line-height:1.5; }
+  .prose-brief li { font-size:0.75rem; color:#cbd5e1; margin-left:1rem; list-style:disc; }
+  .prose-brief strong { color:#fff; }
+  .prose-brief blockquote { border-left:2px solid #1d4ed8; padding-left:0.5rem; color:#94a3b8; font-style:italic; font-size:0.75rem; }
+  .prose-brief hr { border-color:#334155; margin:0.75rem 0; }
+  .prose-brief a  { color:#60a5fa; text-decoration:underline; }
 </style>
 </head>
 <body class="min-h-screen">
@@ -46,10 +57,16 @@
         <p class="text-xs text-slate-400">Prospect Research & Brief Generator</p>
       </div>
     </div>
-    <div class="flex items-center gap-2">
-      <button onclick="loadExcel()" class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
-        📂 Cargar Excel
-      </button>
+    <div class="flex items-center gap-3">
+      <!-- Sync indicator -->
+      <div class="flex items-center gap-2 text-xs text-slate-500">
+        <span id="sync-status" class="hidden items-center gap-1 text-green-400">
+          <span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400"></span> En vivo
+        </span>
+        <span id="last-updated"></span>
+        <button onclick="refreshData()" title="Actualizar"
+                class="btn-gray px-2 py-1 rounded-lg text-slate-300 text-xs transition">↻</button>
+      </div>
       <button onclick="researchAll()" id="btn-all"
               class="btn-green text-sm px-4 py-1.5 rounded-lg text-white font-semibold transition">
         ⚡ Investigar Todos
@@ -212,7 +229,7 @@
 
     <!-- TAB: Brief -->
     <div id="tab-brief" class="hidden p-4">
-      <div id="brief-content" class="prose prose-invert prose-sm max-w-none">
+      <div id="brief-content" class="prose-brief max-w-none">
         <p class="text-slate-400 text-sm">El brief se genera al investigar la empresa.</p>
       </div>
     </div>
@@ -251,7 +268,7 @@
 <div id="batch-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center" style="background:rgba(0,0,0,.7)">
   <div class="card rounded-2xl p-6 w-full max-w-md mx-4">
     <h2 class="text-lg font-bold text-white mb-4">⚡ Investigar Todos</h2>
-    <p class="text-sm text-slate-400 mb-4" id="batch-info">Investigando <span id="batch-current">0</span> / <span id="batch-total">0</span> empresas...</p>
+    <p class="text-sm text-slate-400 mb-4" id="batch-info">Encolando <span id="batch-current">0</span> / <span id="batch-total">0</span> empresas...</p>
     <div class="w-full bg-slate-700 rounded-full h-3 mb-4">
       <div id="batch-bar" class="progress-bar bg-green-500 h-3 rounded-full" style="width:0%"></div>
     </div>
@@ -266,56 +283,97 @@
 <div id="overlay" onclick="closeDrawer()" class="hidden fixed inset-0 z-40" style="background:rgba(0,0,0,.5)"></div>
 
 <script>
+// ─── Supabase config ──────────────────────────────────────────────────────────
+const SUPABASE_URL     = 'https://fmjvktaaxsdhukbkefnw.supabase.co';
+const SUPABASE_ANON_KEY = 'sb_publishable_dGfSJi7aziUG-AyR6zjGew_m_Akgl5S';
+const STORAGE_BASE     = `${SUPABASE_URL}/storage/v1/object/public/packages`;
+
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
 // ─── State ────────────────────────────────────────────────────────────────────
-let allCompanies = [];
-let filtered     = [];
-let currentView  = 'cards';
+let allCompanies  = [];
+let filtered      = [];
+let currentView   = 'cards';
 let activeCompany = null;
-let activeES     = null;
+let activeChannel = null;   // Realtime channel for research progress
+
+// ─── Slug helper ──────────────────────────────────────────────────────────────
+function toSlug(nombre) {
+  return (nombre || '').toLowerCase().replace(/[^\w]/g, '_').substring(0, 35);
+}
+
+function storageUrl(slug, path) {
+  return `${STORAGE_BASE}/${slug}/${path}`;
+}
 
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
-  fetchStats();
   fetchCompanies();
-  setInterval(fetchStats, 30000);
+  // Auto-refresh stats every 30 s
+  setInterval(computeAndRenderStats, 30000);
 });
 
-// ─── API helpers ──────────────────────────────────────────────────────────────
-async function api(path, opts={}) {
-  const r = await fetch(path, opts);
-  if (!r.ok) throw new Error(await r.text());
-  return r.json();
+// ─── Refresh ──────────────────────────────────────────────────────────────────
+async function refreshData() {
+  await fetchCompanies();
 }
 
-// ─── Stats ────────────────────────────────────────────────────────────────────
-async function fetchStats() {
-  try {
-    const s = await api('/api/stats');
-    document.getElementById('s-total').textContent     = s.total;
-    document.getElementById('s-targets').textContent   = s.targets;
-    document.getElementById('s-sinweb').textContent    = s.sin_web;
-    document.getElementById('s-basica').textContent    = s.basica;
-    document.getElementById('s-chat').textContent      = s.con_chat_ia;
-    document.getElementById('s-researched').textContent= s.researched;
-    document.getElementById('s-packages').textContent  = s.packages;
-    document.getElementById('s-alta').textContent      = s.alta_prioridad;
-  } catch(e) {}
-}
-
-// ─── Companies ────────────────────────────────────────────────────────────────
+// ─── Fetch companies from Supabase ────────────────────────────────────────────
 async function fetchCompanies() {
   try {
-    allCompanies = await api('/api/companies');
+    const { data, error } = await supabase
+      .from('companies')
+      .select('*')
+      .order('score', { ascending: false });
+
+    if (error) throw error;
+
+    allCompanies = data || [];
+    computeAndRenderStats();
     populateSectorFilter();
     applyFilters();
-  } catch(e) {
-    console.error(e);
+
+    // Update sync indicator
+    const now = new Date();
+    document.getElementById('last-updated').textContent =
+      `Act. ${now.toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit' })}`;
+    document.getElementById('sync-status').classList.remove('hidden');
+    document.getElementById('sync-status').style.display = 'inline-flex';
+  } catch (e) {
+    console.error('fetchCompanies error:', e);
   }
 }
 
+// ─── Stats (computed client-side) ─────────────────────────────────────────────
+function computeAndRenderStats() {
+  const d = allCompanies;
+  const stats = {
+    total        : d.length,
+    targets      : d.filter(c => c.es_target === 'SI').length,
+    sin_web      : d.filter(c => c.calidad_web === 'SIN WEB' || c.calidad_web === 'CAIDA').length,
+    basica       : d.filter(c => c.calidad_web === 'BASICA').length,
+    con_chat_ia  : d.filter(c => c.chat_ia === 'SI').length,
+    researched   : d.filter(c => c.researched === true).length,
+    packages     : d.filter(c => c.package_ready === true).length,
+    alta_prioridad: d.filter(c => c.prioridad === 'ALTA').length,
+  };
+
+  document.getElementById('s-total').textContent      = stats.total;
+  document.getElementById('s-targets').textContent    = stats.targets;
+  document.getElementById('s-sinweb').textContent     = stats.sin_web;
+  document.getElementById('s-basica').textContent     = stats.basica;
+  document.getElementById('s-chat').textContent       = stats.con_chat_ia;
+  document.getElementById('s-researched').textContent = stats.researched;
+  document.getElementById('s-packages').textContent   = stats.packages;
+  document.getElementById('s-alta').textContent       = stats.alta_prioridad;
+}
+
+// ─── Sector filter population ─────────────────────────────────────────────────
 function populateSectorFilter() {
   const sectors = [...new Set(allCompanies.map(c => c.sector).filter(Boolean))].sort();
   const sel = document.getElementById('f-sector');
+  // Keep first "all" option, rebuild the rest
+  while (sel.options.length > 1) sel.remove(1);
   sectors.forEach(s => {
     const o = document.createElement('option');
     o.value = s; o.textContent = s;
@@ -323,6 +381,7 @@ function populateSectorFilter() {
   });
 }
 
+// ─── Filters (client-side) ────────────────────────────────────────────────────
 function applyFilters() {
   const q       = document.getElementById('f-search').value.toLowerCase();
   const sector  = document.getElementById('f-sector').value;
@@ -332,10 +391,10 @@ function applyFilters() {
 
   filtered = allCompanies.filter(c => {
     if (q && !c.nombre?.toLowerCase().includes(q) && !c.sector?.toLowerCase().includes(q)) return false;
-    if (sector  && c.sector     !== sector)  return false;
+    if (sector  && c.sector      !== sector)  return false;
     if (calidad && c.calidad_web !== calidad) return false;
-    if (target  && c.es_target  !== 'SI')    return false;
-    if (pkg     && !c.package_ready)         return false;
+    if (target  && c.es_target   !== 'SI')   return false;
+    if (pkg     && !c.package_ready)          return false;
     return true;
   });
 
@@ -365,11 +424,15 @@ function renderView() {
 // ─── Badge helpers ────────────────────────────────────────────────────────────
 function calBadge(c) {
   const map = {
-    'SIN WEB':'badge-sin','CAIDA':'badge-caida','BASICA':'badge-basica',
-    'INTERMEDIA':'badge-inter','BUENA':'badge-buena','PROFESIONAL':'badge-prof'
+    'SIN WEB'    : 'badge-sin',
+    'CAIDA'      : 'badge-caida',
+    'BASICA'     : 'badge-basica',
+    'INTERMEDIA' : 'badge-inter',
+    'BUENA'      : 'badge-buena',
+    'PROFESIONAL': 'badge-prof',
   };
   const cls = map[c] || 'badge-gray';
-  return `<span class="${cls} text-xs px-2 py-0.5 rounded-full font-semibold">${c||'?'}</span>`;
+  return `<span class="${cls} text-xs px-2 py-0.5 rounded-full font-semibold">${c || '?'}</span>`;
 }
 function targetBadge(t) {
   return t === 'SI'
@@ -394,10 +457,22 @@ function makeCard(c) {
   div.className = 'card rounded-2xl p-4 flex flex-col gap-3 relative overflow-hidden';
   div.id = `card-${c.id}`;
 
+  const slug    = toSlug(c.nombre);
+  const logoUrl = storageUrl(slug, 'logo.png');
+
   const logoHtml = c.package_ready
-    ? `<img src="/api/packages/${c.id}/logo" class="w-10 h-10 rounded-lg object-cover bg-slate-700"
-            onerror="this.style.display='none';this.nextSibling.style.display='flex'">`
+    ? `<img src="${logoUrl}" class="w-10 h-10 rounded-lg object-cover bg-slate-700"
+            onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
     : '';
+
+  const urlHtml = (() => {
+    try {
+      if (c.url && c.url.startsWith('http')) {
+        return `<p class="truncate">🌐 <a href="${c.url}" target="_blank" class="text-blue-400 hover:underline">${new URL(c.url).hostname}</a></p>`;
+      }
+    } catch (_) {}
+    return '';
+  })();
 
   div.innerHTML = `
     <!-- Progress overlay -->
@@ -411,7 +486,7 @@ function makeCard(c) {
         ${logoHtml}
         <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold text-slate-300"
              style="background:#1e3a8a; display:${c.package_ready ? 'none' : 'flex'}">
-          ${(c.nombre||'?')[0]}
+          ${(c.nombre || '?')[0]}
         </div>
         <div>
           ${calBadge(c.calidad_web)}
@@ -426,10 +501,10 @@ function makeCard(c) {
 
     <!-- Meta -->
     <div class="text-xs text-slate-400 space-y-0.5">
-      <p>📂 ${c.sector||'—'}</p>
-      <p>📍 ${c.municipio||'—'} &bull; 👥 ${c.empleados||'—'} emp</p>
+      <p>📂 ${c.sector || '—'}</p>
+      <p>📍 ${c.municipio || '—'} &bull; 👥 ${c.empleados || '—'} emp</p>
       ${c.telefono ? `<p>📞 ${c.telefono}</p>` : ''}
-      ${c.url && c.url.startsWith('http') ? `<p class="truncate">🌐 <a href="${c.url}" target="_blank" class="text-blue-400 hover:underline">${new URL(c.url).hostname}</a></p>` : ''}
+      ${urlHtml}
     </div>
 
     <!-- Proposal snippet -->
@@ -438,9 +513,9 @@ function makeCard(c) {
     <!-- Status log line -->
     <div id="log-${c.id}" class="hidden text-xs text-blue-400 font-mono truncate"></div>
 
-    <!-- Color bar if package ready -->
+    <!-- Color swatch if package ready -->
     ${c.package_ready && c.primary_color
-      ? `<div class="flex gap-1">${(c.palette||[c.primary_color]).slice(0,5).map(col=>`<div class="color-swatch" style="background:${col}" title="${col}"></div>`).join('')}</div>`
+      ? `<div class="flex gap-1"><div class="color-swatch" style="background:${c.primary_color}" title="${c.primary_color}"></div></div>`
       : ''}
 
     <!-- Buttons -->
@@ -468,14 +543,14 @@ function renderTable() {
     tr.innerHTML = `
       <td class="py-2 px-3">
         <span class="font-semibold text-white text-sm">${c.nombre}</span>
-        <br><span class="text-xs text-slate-500">${c.municipio||''}</span>
+        <br><span class="text-xs text-slate-500">${c.municipio || ''}</span>
       </td>
-      <td class="py-2 px-3 text-xs text-slate-400">${c.sector||''}</td>
-      <td class="py-2 px-3 text-xs text-center">${c.empleados||''}</td>
+      <td class="py-2 px-3 text-xs text-slate-400">${c.sector || ''}</td>
+      <td class="py-2 px-3 text-xs text-center">${c.empleados || ''}</td>
       <td class="py-2 px-3">${calBadge(c.calidad_web)}</td>
-      <td class="py-2 px-3 text-xs text-center ${c.chat_ia==='SI'?'text-green-400':'text-red-400'}">${c.chat_ia||'?'}</td>
+      <td class="py-2 px-3 text-xs text-center ${c.chat_ia === 'SI' ? 'text-green-400' : 'text-red-400'}">${c.chat_ia || '?'}</td>
       <td class="py-2 px-3">${targetBadge(c.es_target)}</td>
-      <td class="py-2 px-3 text-xs text-slate-400">${c.telefono||''}</td>
+      <td class="py-2 px-3 text-xs text-slate-400">${c.telefono || ''}</td>
       <td class="py-2 px-3">
         <button onclick="openDrawer('${c.id}')"
                 class="btn-primary text-xs px-3 py-1 rounded-lg text-white transition">
@@ -492,8 +567,8 @@ async function openDrawer(cid) {
   activeCompany = allCompanies.find(c => c.id === cid);
   if (!activeCompany) return;
 
-  document.getElementById('drawer-title').textContent   = activeCompany.nombre;
-  document.getElementById('drawer-subtitle').textContent = `${activeCompany.sector} · ${activeCompany.municipio}`;
+  document.getElementById('drawer-title').textContent    = activeCompany.nombre;
+  document.getElementById('drawer-subtitle').textContent = `${activeCompany.sector || ''} · ${activeCompany.municipio || ''}`;
 
   // Reset tabs
   showTab('research');
@@ -504,11 +579,11 @@ async function openDrawer(cid) {
     <div class="grid grid-cols-2 gap-2 text-xs">
       <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Calidad Web</span><br>${calBadge(activeCompany.calidad_web)}</div>
       <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Target</span><br>${targetBadge(activeCompany.es_target)}</div>
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Empleados</span><br><span class="text-white font-semibold">${activeCompany.empleados}</span></div>
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Chat IA</span><br><span class="${activeCompany.chat_ia==='SI'?'text-green-400':'text-red-400'} font-semibold">${activeCompany.chat_ia||'?'}</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Empleados</span><br><span class="text-white font-semibold">${activeCompany.empleados || '—'}</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Chat IA</span><br><span class="${activeCompany.chat_ia === 'SI' ? 'text-green-400' : 'text-red-400'} font-semibold">${activeCompany.chat_ia || '?'}</span></div>
     </div>
     ${activeCompany.telefonos ? `<p class="text-xs text-slate-300">📞 ${activeCompany.telefonos}</p>` : ''}
-    ${activeCompany.emails    ? `<p class="text-xs text-slate-300">✉️ ${activeCompany.emails}</p>` : ''}
+    ${activeCompany.emails    ? `<p class="text-xs text-slate-300">✉️ ${activeCompany.emails}</p>`    : ''}
     ${activeCompany.url       ? `<p class="text-xs"><a href="${activeCompany.url}" target="_blank" class="text-blue-400 hover:underline truncate block">🌐 ${activeCompany.url}</a></p>` : ''}
     ${activeCompany.propuesta ? `<div class="bg-slate-800 rounded-lg p-2 text-xs text-slate-300 italic">${activeCompany.propuesta}</div>` : ''}
   `;
@@ -523,10 +598,14 @@ async function openDrawer(cid) {
   document.getElementById('btn-download').disabled = !activeCompany.package_ready;
   document.getElementById('btn-download').classList.toggle('opacity-50', !activeCompany.package_ready);
 
-  // If package exists, load assets
+  // Reset research button
+  document.getElementById('btn-research').disabled = false;
+  document.getElementById('btn-research').textContent = activeCompany.researched ? '🔄 Re-investigar' : '🔍 Investigar';
+
+  // If package exists, pre-load assets
   if (activeCompany.package_ready) {
-    loadAssets(cid);
-    loadBrief(cid);
+    loadAssets(activeCompany);
+    loadBrief(activeCompany);
   }
 
   document.getElementById('drawer').classList.add('open');
@@ -536,11 +615,16 @@ async function openDrawer(cid) {
 function closeDrawer() {
   document.getElementById('drawer').classList.remove('open');
   document.getElementById('overlay').classList.add('hidden');
+  // Unsubscribe realtime channel if open
+  if (activeChannel) {
+    supabase.removeChannel(activeChannel);
+    activeChannel = null;
+  }
   activeCompany = null;
 }
 
 function showTab(tab) {
-  ['research','brief','assets'].forEach(t => {
+  ['research', 'brief', 'assets'].forEach(t => {
     document.getElementById(`tab-${t}`).classList.toggle('hidden', t !== tab);
   });
   document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -551,115 +635,166 @@ function showTab(tab) {
   });
 }
 
-// ─── Research ─────────────────────────────────────────────────────────────────
+// ─── Research (Supabase queue + Realtime) ─────────────────────────────────────
 async function startResearch() {
   if (!activeCompany) return;
-  const cid = activeCompany.id;
-  const log = document.getElementById('log-output');
+  const cid    = activeCompany.id;
+  const nombre = activeCompany.nombre;
+  const log    = document.getElementById('log-output');
   log.innerHTML = '';
 
   // Show progress
   document.getElementById('research-progress').classList.remove('hidden');
-  document.getElementById('btn-research').disabled = true;
-  document.getElementById('btn-research').textContent = '⏳ Investigando...';
+  document.getElementById('btn-research').disabled    = true;
+  document.getElementById('btn-research').textContent = '⏳ En cola...';
 
   // Show card progress bar
   const progCard = document.getElementById(`prog-${cid}`);
   if (progCard) progCard.classList.remove('hidden');
 
+  // Unsubscribe any previous channel
+  if (activeChannel) {
+    await supabase.removeChannel(activeChannel);
+    activeChannel = null;
+  }
+
   try {
-    const {job_id} = await api(`/api/research/${cid}`, {method:'POST'});
-    if (activeES) activeES.close();
+    // Insert job into research_queue
+    const { data: queueRows, error: insertErr } = await supabase
+      .from('research_queue')
+      .insert({
+        company_id  : cid,
+        company_name: nombre,
+        status      : 'pending',
+        progress_pct: 0,
+        progress_msg: 'En cola...',
+      })
+      .select();
 
-    activeES = new EventSource(`/api/stream/${job_id}`);
+    if (insertErr) throw insertErr;
 
-    activeES.addEventListener('progress', e => {
-      const d = JSON.parse(e.data);
-      addLog(log, d.msg, d.step);
-      updateProgress(d.pct || 0, d.msg);
-      const pbar = document.getElementById(`pbar-${cid}`);
-      if (pbar) pbar.style.width = (d.pct||0) + '%';
-      const logLine = document.getElementById(`log-${cid}`);
-      if (logLine) { logLine.classList.remove('hidden'); logLine.textContent = d.msg; }
-    });
+    const queueRow = queueRows[0];
+    addLog(log, `✓ Trabajo encolado (id: ${queueRow.id})`, 'info');
+    addLog(log, 'Esperando que el worker procese...', 'info');
+    updateProgress(0, 'En cola...');
 
-    activeES.addEventListener('done', e => {
-      activeES.close();
-      const d = JSON.parse(e.data);
-      addLog(log, '✓ Investigacion completada!', 'done');
-      updateProgress(100, 'Completado');
+    // Subscribe to Realtime updates for this queue row
+    activeChannel = supabase
+      .channel(`research_queue:${queueRow.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event : 'UPDATE',
+          schema: 'public',
+          table : 'research_queue',
+          filter: `id=eq.${queueRow.id}`,
+        },
+        (payload) => {
+          const row = payload.new;
+          const pct = row.progress_pct || 0;
+          const msg = row.progress_msg || '';
 
-      // Update company in memory
-      const idx = allCompanies.findIndex(c => c.id === cid);
-      if (idx >= 0) {
-        allCompanies[idx] = {...allCompanies[idx], ...d, researched:true, package_ready:true};
-        activeCompany = allCompanies[idx];
-      }
+          addLog(log, msg, row.status === 'error' ? 'error' : 'info');
+          updateProgress(pct, msg);
 
-      document.getElementById('btn-research').textContent = '✓ Investigada';
-      document.getElementById('btn-download').disabled = false;
-      document.getElementById('btn-download').classList.remove('opacity-50');
+          // Update card progress bar
+          const pbar = document.getElementById(`pbar-${cid}`);
+          if (pbar) pbar.style.width = pct + '%';
+          const logLine = document.getElementById(`log-${cid}`);
+          if (logLine) { logLine.classList.remove('hidden'); logLine.textContent = msg; }
 
-      // Reload card
-      const card = document.getElementById(`card-${cid}`);
-      if (card) card.replaceWith(makeCard(allCompanies[idx]));
+          if (row.status === 'done') {
+            addLog(log, '✓ Investigación completada!', 'done');
+            updateProgress(100, 'Completado');
+            onResearchDone(cid);
+            supabase.removeChannel(activeChannel);
+            activeChannel = null;
+          } else if (row.status === 'error') {
+            addLog(log, `Error: ${msg}`, 'error');
+            document.getElementById('btn-research').disabled    = false;
+            document.getElementById('btn-research').textContent = '🔍 Reintentar';
+            supabase.removeChannel(activeChannel);
+            activeChannel = null;
+          }
+        }
+      )
+      .subscribe();
 
-      loadAssets(cid);
-      loadBrief(cid);
-      fetchStats();
-    });
-
-    activeES.addEventListener('error', e => {
-      const d = JSON.parse(e.data || '{}');
-      addLog(log, `Error: ${d.msg||'conexion perdida'}`, 'error');
-      activeES.close();
-      document.getElementById('btn-research').disabled = false;
-      document.getElementById('btn-research').textContent = '🔍 Reintentar';
-    });
-
-  } catch(err) {
+  } catch (err) {
     addLog(log, `Error: ${err.message}`, 'error');
-    document.getElementById('btn-research').disabled = false;
+    document.getElementById('btn-research').disabled    = false;
     document.getElementById('btn-research').textContent = '🔍 Investigar';
   }
 }
 
-function addLog(container, msg, type='info') {
+async function onResearchDone(cid) {
+  // Re-fetch the company from Supabase to get latest data
+  const { data } = await supabase.from('companies').select('*').eq('id', cid).single();
+  if (data) {
+    const idx = allCompanies.findIndex(c => c.id === cid);
+    if (idx >= 0) allCompanies[idx] = data;
+    activeCompany = data;
+  }
+
+  document.getElementById('btn-research').textContent = '✓ Investigada';
+  document.getElementById('btn-download').disabled = false;
+  document.getElementById('btn-download').classList.remove('opacity-50');
+
+  // Reload card
+  const card = document.getElementById(`card-${cid}`);
+  if (card) card.replaceWith(makeCard(activeCompany));
+
+  loadAssets(activeCompany);
+  loadBrief(activeCompany);
+  computeAndRenderStats();
+}
+
+function addLog(container, msg, type = 'info') {
   const colors = {
-    done:'text-green-400', error:'text-red-400', logo:'text-yellow-400',
-    colors:'text-purple-400', images:'text-cyan-400', brief:'text-blue-400',
+    done  : 'text-green-400',
+    error : 'text-red-400',
+    logo  : 'text-yellow-400',
+    colors: 'text-purple-400',
+    images: 'text-cyan-400',
+    brief : 'text-blue-400',
   };
   const cls = colors[type] || 'text-slate-300';
-  const ts  = new Date().toLocaleTimeString('es', {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+  const ts  = new Date().toLocaleTimeString('es', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   const p   = document.createElement('p');
-  p.className = cls;
+  p.className   = cls;
   p.textContent = `[${ts}] ${msg}`;
   container.appendChild(p);
   container.scrollTop = container.scrollHeight;
 }
 
 function updateProgress(pct, msg) {
-  document.getElementById('progress-bar').style.width = pct + '%';
-  document.getElementById('progress-pct').textContent  = pct + '%';
-  document.getElementById('progress-step').textContent = msg;
+  document.getElementById('progress-bar').style.width   = pct + '%';
+  document.getElementById('progress-pct').textContent   = pct + '%';
+  document.getElementById('progress-step').textContent  = msg;
 }
 
-// ─── Assets ───────────────────────────────────────────────────────────────────
-async function loadAssets(cid) {
+// ─── Assets (Supabase Storage) ────────────────────────────────────────────────
+async function loadAssets(company) {
+  const slug = toSlug(company.nombre);
+
+  // Logo
+  const logoDiv = document.getElementById('assets-logo');
+  const logoUrl = storageUrl(slug, 'logo.png');
+  logoDiv.innerHTML = `
+    <img src="${logoUrl}" class="w-full h-full object-contain p-2"
+         onerror="this.parentElement.innerHTML='<span class=\\'text-4xl\\'>🏢</span>'">
+  `;
+
+  // Colors — fetch colors.json from Storage
+  const colorsUrl = storageUrl(slug, 'colors.json');
+  const palette   = document.getElementById('color-palette');
+  palette.innerHTML = '';
   try {
-    const pkg = await api(`/api/packages/${cid}`);
-
-    // Logo
-    const logoDiv = document.getElementById('assets-logo');
-    logoDiv.innerHTML = pkg.has_logo
-      ? `<img src="/api/packages/${cid}/logo?t=${Date.now()}" class="w-full h-full object-contain p-2">`
-      : `<span class="text-4xl">🏢</span>`;
-
-    // Colors
-    const palette = document.getElementById('color-palette');
-    palette.innerHTML = '';
-    if (pkg.colors?.palette) {
-      pkg.colors.palette.forEach(hex => {
+    const res = await fetch(colorsUrl);
+    if (res.ok) {
+      const colData = await res.json();
+      const colors  = colData.palette || (colData.dominant ? [colData.dominant] : []);
+      colors.forEach(hex => {
         const sw = document.createElement('div');
         sw.className = 'color-swatch cursor-pointer';
         sw.style.background = hex;
@@ -667,56 +802,77 @@ async function loadAssets(cid) {
         sw.onclick = () => navigator.clipboard.writeText(hex);
         palette.appendChild(sw);
       });
-      const label = document.createElement('p');
-      label.className = 'text-xs text-slate-500 mt-1 w-full';
-      label.textContent = `Primario: ${pkg.colors.dominant} · Clic para copiar`;
-      palette.appendChild(label);
+      if (colData.dominant) {
+        const label = document.createElement('p');
+        label.className   = 'text-xs text-slate-500 mt-1 w-full';
+        label.textContent = `Primario: ${colData.dominant} · Clic para copiar`;
+        palette.appendChild(label);
+      }
+    } else {
+      palette.innerHTML = '<p class="text-xs text-slate-500">No se encontró paleta de colores</p>';
     }
+  } catch (_) {
+    palette.innerHTML = '<p class="text-xs text-slate-500">No se encontró paleta de colores</p>';
+  }
 
-    // Photos
-    const grid = document.getElementById('photo-grid');
-    grid.innerHTML = '';
-    pkg.images.forEach(img => {
+  // Photos — probe photo_1.png … photo_12.png
+  const grid = document.getElementById('photo-grid');
+  grid.innerHTML = '<p class="text-xs text-slate-500 col-span-3">Cargando fotos...</p>';
+  const photoPromises = Array.from({ length: 12 }, (_, i) => {
+    const url = storageUrl(slug, `images/photo_${i + 1}.png`);
+    return fetch(url, { method: 'HEAD' })
+      .then(r => r.ok ? url : null)
+      .catch(() => null);
+  });
+  const photoUrls = (await Promise.all(photoPromises)).filter(Boolean);
+  grid.innerHTML = '';
+  if (photoUrls.length === 0) {
+    grid.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No se encontraron fotos</p>';
+  } else {
+    photoUrls.forEach(url => {
       const div = document.createElement('div');
       div.className = 'rounded-lg overflow-hidden bg-slate-800 aspect-square';
-      div.innerHTML = `<img src="/api/packages/${cid}/images/${img}" class="w-full h-full object-cover"
-                            onerror="this.parentElement.innerHTML='<span class=text-slate-600 text-xs p-2>Sin imagen</span>'">`;
+      div.innerHTML = `<img src="${url}" class="w-full h-full object-cover"
+                            onerror="this.parentElement.innerHTML='<span class=\\'text-slate-600 text-xs p-2\\'>Sin imagen</span>'">`;
       grid.appendChild(div);
     });
-    if (pkg.images.length === 0) {
-      grid.innerHTML = '<p class="text-xs text-slate-500 col-span-3">No se encontraron fotos</p>';
-    }
+  }
 
-    // Socials
-    const sl = document.getElementById('socials-list');
-    const content = pkg.content || {};
-    const socials = content.social_media || {};
-    sl.innerHTML = Object.entries(socials).filter(([,v]) => v).map(([k,v]) =>
-      `<a href="${v}" target="_blank" class="text-blue-400 hover:underline text-xs block">${k}: ${v}</a>`
-    ).join('') || '<p class="text-xs text-slate-500">No se encontraron redes sociales</p>';
-
-  } catch(e) {}
+  // Socials — from company object fields
+  const sl = document.getElementById('socials-list');
+  const socialFields = {
+    facebook  : company.facebook,
+    instagram : company.instagram,
+    linkedin  : company.linkedin,
+    twitter   : company.twitter,
+    youtube   : company.youtube,
+    tiktok    : company.tiktok,
+    whatsapp  : company.whatsapp_link,
+  };
+  const socialLinks = Object.entries(socialFields)
+    .filter(([, v]) => v)
+    .map(([k, v]) => `<a href="${v}" target="_blank" class="text-blue-400 hover:underline text-xs block">${k}: ${v}</a>`)
+    .join('');
+  sl.innerHTML = socialLinks || '<p class="text-xs text-slate-500">No se encontraron redes sociales</p>';
 }
 
-async function loadBrief(cid) {
+// ─── Brief (Supabase Storage) ─────────────────────────────────────────────────
+async function loadBrief(company) {
+  const slug    = toSlug(company.nombre);
+  const briefUrl = storageUrl(slug, 'brief.md');
+  const div     = document.getElementById('brief-content');
+
   try {
-    const pkg  = await api(`/api/packages/${cid}`);
-    const div  = document.getElementById('brief-content');
-    if (pkg.brief) {
-      // Simple markdown -> HTML (headings + lists)
-      let html = pkg.brief
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold text-white mt-4 mb-1">$1</h2>')
-        .replace(/^### (.+)$/gm,'<h3 class="text-sm font-semibold text-blue-300 mt-3 mb-1">$1</h3>')
-        .replace(/^# (.+)$/gm,  '<h1 class="text-lg font-bold text-white mb-2">$1</h1>')
-        .replace(/\*\*(.+?)\*\*/g,'<strong class="text-white">$1</strong>')
-        .replace(/^- (.+)$/gm,   '<li class="text-slate-300 text-xs ml-3">$1</li>')
-        .replace(/^> (.+)$/gm,   '<blockquote class="border-l-2 border-blue-500 pl-2 text-slate-400 text-xs italic">$1</blockquote>')
-        .replace(/\n\n/g,        '<br>')
-        .replace(/---/g,         '<hr class="border-slate-600 my-3">');
-      div.innerHTML = `<div class="text-xs text-slate-300 space-y-1">${html}</div>`;
+    const res = await fetch(briefUrl);
+    if (!res.ok) {
+      div.innerHTML = '<p class="text-slate-400 text-sm">El brief aún no ha sido generado.</p>';
+      return;
     }
-  } catch(e) {}
+    const md   = await res.text();
+    div.innerHTML = marked.parse(md);
+  } catch (_) {
+    div.innerHTML = '<p class="text-slate-400 text-sm">No se pudo cargar el brief.</p>';
+  }
 }
 
 // ─── Download ─────────────────────────────────────────────────────────────────
@@ -725,31 +881,20 @@ function downloadPackage() {
   downloadPkg(activeCompany.id);
 }
 function downloadPkg(cid) {
-  window.open(`/api/packages/${cid}/download`, '_blank');
+  const company = allCompanies.find(c => c.id === cid);
+  if (!company) return;
+  const slug = toSlug(company.nombre);
+  window.open(storageUrl(slug, 'package.zip'), '_blank');
 }
 
-// ─── Load Excel ───────────────────────────────────────────────────────────────
-async function loadExcel() {
-  const path = prompt('Ruta del archivo Excel:', 'C:\\Users\\Willy\\OneDrive\\Escritorio\\INVESTIGACION_100_EMPRESAS.xlsx');
-  if (!path) return;
-  try {
-    const r = await api('/api/load-excel', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({path})
-    });
-    alert(`✓ ${r.loaded} empresas cargadas (total: ${r.total})`);
-    await fetchCompanies();
-    await fetchStats();
-  } catch(e) {
-    alert('Error: ' + e.message);
-  }
-}
-
-// ─── Research All ─────────────────────────────────────────────────────────────
+// ─── Research All (batch enqueue) ─────────────────────────────────────────────
 async function researchAll() {
-  const pending = allCompanies.filter(c => !c.researched).map(c => c.id);
-  if (pending.length === 0) { alert('Todas las empresas ya fueron investigadas.'); return; }
-  if (!confirm(`Investigar ${pending.length} empresas. Esto tardará ~${Math.ceil(pending.length*4/60)} minutos. ¿Continuar?`)) return;
+  const pending = allCompanies.filter(c => !c.researched);
+  if (pending.length === 0) {
+    alert('Todas las empresas ya fueron investigadas.');
+    return;
+  }
+  if (!confirm(`Encolar ${pending.length} empresas para investigación. ¿Continuar?`)) return;
 
   document.getElementById('batch-modal').classList.remove('hidden');
   document.getElementById('batch-total').textContent   = pending.length;
@@ -757,47 +902,40 @@ async function researchAll() {
   const batchLog = document.getElementById('batch-log');
   batchLog.innerHTML = '';
 
-  try {
-    const {job_id, count} = await api('/api/research/batch', {
-      method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify(pending)
-    });
+  let enqueued = 0;
+  for (const company of pending) {
+    try {
+      const { error } = await supabase.from('research_queue').insert({
+        company_id  : company.id,
+        company_name: company.nombre,
+        status      : 'pending',
+        progress_pct: 0,
+        progress_msg: 'En cola...',
+      });
+      if (error) throw error;
+      enqueued++;
+      document.getElementById('batch-current').textContent = enqueued;
+      document.getElementById('batch-bar').style.width = Math.round((enqueued / pending.length) * 100) + '%';
 
-    const es = new EventSource(`/api/stream/${job_id}`);
-    let done = 0;
-
-    es.addEventListener('progress', e => {
-      const d = JSON.parse(e.data);
-      if (d.batch_progress) {
-        const [curr, tot] = d.batch_progress.split('/');
-        document.getElementById('batch-current').textContent = curr;
-        document.getElementById('batch-bar').style.width = Math.round(parseInt(curr)/parseInt(tot)*100) + '%';
-      }
-      if (d.step === 'done' || d.step === 'start') {
-        const p = document.createElement('p');
-        p.className = d.step === 'done' ? 'text-green-400' : 'text-slate-300';
-        p.textContent = `[${new Date().toLocaleTimeString()}] ${d.msg || d.nombre || ''}`;
-        batchLog.appendChild(p);
-        batchLog.scrollTop = batchLog.scrollHeight;
-        done++;
-      }
-    });
-
-    es.addEventListener('batch_done', e => {
-      es.close();
       const p = document.createElement('p');
-      p.className = 'text-green-400 font-bold';
-      p.textContent = '✓ Todos completados!';
+      p.className   = 'text-slate-300';
+      p.textContent = `[${new Date().toLocaleTimeString()}] Encolada: ${company.nombre}`;
       batchLog.appendChild(p);
-      fetchCompanies();
-      fetchStats();
-    });
-
-    es.onerror = () => es.close();
-
-  } catch(err) {
-    alert('Error: ' + err.message);
+      batchLog.scrollTop = batchLog.scrollHeight;
+    } catch (err) {
+      const p = document.createElement('p');
+      p.className   = 'text-red-400';
+      p.textContent = `[${new Date().toLocaleTimeString()}] Error: ${company.nombre} — ${err.message}`;
+      batchLog.appendChild(p);
+      batchLog.scrollTop = batchLog.scrollHeight;
+    }
   }
+
+  const done = document.createElement('p');
+  done.className   = 'text-green-400 font-bold';
+  done.textContent = `✓ ${enqueued} empresas encoladas. El worker procesará en segundo plano.`;
+  batchLog.appendChild(done);
+  batchLog.scrollTop = batchLog.scrollHeight;
 }
 
 function closeBatchModal() {
