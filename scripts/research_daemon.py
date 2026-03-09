@@ -7,7 +7,14 @@ Run: py scripts/research_daemon.py
      py scripts/research_daemon.py --once   (process queue once, then exit)
 """
 import sys, io, os, json, re, time, argparse, traceback
-sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+# Robust UTF-8 stdout
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    elif hasattr(sys.stdout, 'buffer'):
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 import requests
 from pathlib import Path
@@ -36,15 +43,17 @@ POLL_INTERVAL = 8  # seconds between queue polls
 # ─── Research imports ─────────────────────────────────────────────────────────
 sys.path.insert(0, str(BASE_DIR))
 from scripts.investigar_100 import (
-    buscar, detectar_url, scrape, extraer, score_web,
-    propuesta, tiene_chat, tiene_whatsapp,
+    extraer, score_web, propuesta, tiene_chat, tiene_whatsapp,
     phones_from, emails_from, socials_from,
 )
+# Nuevos motores mejorados
+from portal.services.search_engine import buscar_multi, detect_official_url
+from portal.services.scraper import scrape_smart
+from portal.services.maps_engine import get_maps_data
 from portal.services.image_collector import get_logo, get_og_image, get_site_photos
 from portal.services.color_extractor import extract_colors
 from portal.services.brief_generator import generate_package
 from portal.services.deep_extractor import deep_extract
-from portal.services.google_maps import enrich_with_maps
 
 
 # ─── Supabase helpers ─────────────────────────────────────────────────────────
@@ -87,7 +96,7 @@ def upload_file(local_path: Path, storage_path: str, content_type: str = None) -
         f"{SUPABASE_URL}/storage/v1/object/packages/{storage_path}",
         headers={"apikey": SERVICE_KEY, "Authorization": f"Bearer {SERVICE_KEY}",
                  "Content-Type": content_type, "x-upsert": "true"},
-        data=data, timeout=30,
+        data=data, timeout=90,
     )
     return r.status_code in (200, 201)
 
@@ -145,24 +154,27 @@ def research_company_sync(company: dict, emit) -> dict:
 
     step("start", f"Iniciando: {nombre}", 3)
 
-    # 1. Search
-    step("search", "Buscando en DuckDuckGo...", 8)
+    # 1. Búsqueda multi-fuente (DDG → Google → Bing)
+    step("search", "Buscando en múltiples fuentes (DDG / Google / Bing)...", 8)
     try:
-        results, nombre_limpio = buscar(nombre)
-    except Exception as e:
+        results, nombre_limpio = buscar_multi(nombre)
+        step("search", f"Encontrados {len(results)} resultados", 11)
+    except Exception:
         results, nombre_limpio = [], nombre
 
-    # 2. URL
-    step("url", "Detectando sitio web...", 14)
-    url_oficial = detectar_url(results, nombre, nombre_limpio) or company.get("url", "")
+    # 2. URL oficial
+    step("url", "Detectando sitio web oficial...", 14)
+    url_oficial = detect_official_url(results, nombre, nombre_limpio) or company.get("url", "")
     step("url", f"Web: {url_oficial or 'NO ENCONTRADA'}", 18)
 
-    # 3. Scrape
+    # 3. Scrape inteligente (requests → Playwright si necesario)
     soup, html, url_final = None, "", url_oficial
     if url_oficial:
-        step("scrape", "Analizando sitio web...", 22)
+        step("scrape", "Analizando sitio (con fallback JS si es necesario)...", 22)
         try:
-            soup, html, url_final = scrape(url_oficial)
+            soup, html, url_final = scrape_smart(url_oficial)
+            method = "Playwright" if (soup and len(html) > 2000 and "ng-version" not in html) else "requests"
+            step("scrape", f"Sitio cargado — {len(html):,} chars", 26)
         except Exception:
             pass
 
@@ -192,17 +204,18 @@ def research_company_sync(company: dict, emit) -> dict:
         redes["TikTok"] = deep["tiktok"]
     step("deep", f"Servicios: {len(deep.get('services',[]))} | FAQ: {len(deep.get('faq',[]))}", 38)
 
-    # 6. Google Maps
-    step("maps", "Buscando en Google Maps...", 42)
+    # 6. Google Maps (API → Playwright → DDG snippets)
+    step("maps", "Obteniendo datos de Google Maps...", 42)
     try:
-        maps_data = enrich_with_maps({
-            "nombre": nombre,
-            "municipio": company.get("municipio",""),
-            "direccion": company.get("direccion",""),
-        })
+        maps_data = get_maps_data(
+            nombre,
+            company.get("municipio", ""),
+            company.get("direccion", ""),
+        )
+        rating_str = f"{maps_data['rating']}/5 ({maps_data.get('review_count',0)} reseñas)" if maps_data.get("rating") else "no encontrado"
+        step("maps", f"Maps: {rating_str}", 46)
     except Exception:
-        maps_data = {"maps_url": "", "rating": None, "review_count": None}
-    step("maps", f"Rating: {maps_data.get('rating','-') or '-'}/5", 46)
+        maps_data = {"maps_url": "", "rating": None, "review_count": None, "hours_text": "", "found": False}
 
     # 7. Logo
     step("logo", "Descargando logo...", 50)
@@ -288,13 +301,16 @@ def upload_results(company: dict, photos: list, s: str):
             if img.suffix.lower() in (".png",".jpg",".jpeg",".webp"):
                 upload_file(img, f"{s}/images/{img.name}")
 
-    # Create and upload ZIP
+    # Create and upload ZIP (skip images > 5MB to keep zip small)
     zip_path = pkg_dir / "package.zip"
     with zipfile.ZipFile(str(zip_path), "w", zipfile.ZIP_DEFLATED) as zf:
         for f in pkg_dir.rglob("*"):
             if f.is_file() and f.name != "package.zip":
+                if f.suffix.lower() in (".png", ".jpg", ".jpeg", ".webp") and f.stat().st_size > 500_000:
+                    continue  # skip large images from zip (already uploaded individually)
                 zf.write(str(f), f.relative_to(pkg_dir))
-    upload_file(zip_path, f"{s}/package.zip")
+    if zip_path.stat().st_size < 20_000_000:  # only upload if < 20MB
+        upload_file(zip_path, f"{s}/package.zip")
 
 
 # ─── Main daemon loop ─────────────────────────────────────────────────────────

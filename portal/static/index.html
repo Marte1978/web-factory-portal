@@ -68,6 +68,9 @@
         <button onclick="refreshData()" title="Actualizar"
                 class="btn-gray px-2 py-1 rounded-lg text-slate-300 text-xs transition">↻</button>
       </div>
+      <button onclick="openQuickAdd()" class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
+        ➕ Agregar Cliente
+      </button>
       <button onclick="openImport()" class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
         📊 Importar Excel
       </button>
@@ -313,14 +316,103 @@ function storageUrl(slug, path) {
 // ─── Boot ─────────────────────────────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
   fetchCompanies();
-  // Auto-refresh stats every 30 s
-  setInterval(computeAndRenderStats, 30000);
+  initRealtime();
 });
+
+// ─── Supabase Realtime ────────────────────────────────────────────────────────
+function initRealtime() {
+  supabase
+    .channel('companies-live')
+    .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'companies' },
+        payload => {
+          // Evitar duplicado si ya está (optimistic update)
+          if (!allCompanies.find(c => c.id === payload.new.id)) {
+            allCompanies.unshift(payload.new);
+          } else {
+            const i = allCompanies.findIndex(c => c.id === payload.new.id);
+            allCompanies[i] = payload.new;
+          }
+          computeAndRenderStats();
+          applyFilters();
+          flashSync('↑ nuevo');
+        })
+    .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'companies' },
+        payload => {
+          const i = allCompanies.findIndex(c => c.id === payload.new.id);
+          if (i >= 0) allCompanies[i] = payload.new;
+          else allCompanies.unshift(payload.new);
+          computeAndRenderStats();
+          applyFilters();
+          flashSync('↻ actualizado');
+        })
+    .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'companies' },
+        payload => {
+          allCompanies = allCompanies.filter(c => c.id !== payload.old.id);
+          computeAndRenderStats();
+          applyFilters();
+          flashSync('✕ eliminado');
+        })
+    .subscribe(status => {
+      const dot = document.getElementById('sync-status');
+      if (status === 'SUBSCRIBED') {
+        dot.style.display = 'inline-flex';
+        dot.classList.remove('hidden');
+        dot.innerHTML = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse"></span> En vivo';
+      } else if (status === 'CLOSED' || status === 'CHANNEL_ERROR') {
+        dot.innerHTML = '<span class="inline-block w-1.5 h-1.5 rounded-full bg-red-400"></span> Desconectado';
+        // Reconectar en 5s
+        setTimeout(initRealtime, 5000);
+      }
+    });
+}
+
+function flashSync(msg) {
+  const el = document.getElementById('last-updated');
+  const prev = el.textContent;
+  el.textContent = msg;
+  el.style.color = '#4ade80';
+  setTimeout(() => {
+    el.textContent = `Act. ${new Date().toLocaleTimeString('es',{hour:'2-digit',minute:'2-digit'})}`;
+    el.style.color = '';
+  }, 1500);
+}
 
 // ─── Refresh ──────────────────────────────────────────────────────────────────
 async function refreshData() {
   await fetchCompanies();
 }
+
+// ─── Poll incremental (cada 8s) ──────────────────────────────────────────────
+let lastPollTime = new Date().toISOString();
+async function pollChanges() {
+  try {
+    const { data } = await supabase
+      .from('companies')
+      .select('*')
+      .gte('updated_at', lastPollTime)
+      .order('updated_at', { ascending: false });
+
+    if (data && data.length > 0) {
+      let changed = false;
+      data.forEach(row => {
+        const i = allCompanies.findIndex(c => c.id === row.id);
+        if (i >= 0) { allCompanies[i] = row; changed = true; }
+        else        { allCompanies.unshift(row); changed = true; }
+      });
+      if (changed) {
+        allCompanies.sort((a,b) => (b.score||0) - (a.score||0));
+        computeAndRenderStats();
+        applyFilters();
+        flashSync(`↻ ${data.length} cambio(s)`);
+      }
+    }
+    lastPollTime = new Date().toISOString();
+  } catch(e) { /* silencioso */ }
+}
+setInterval(pollChanges, 8000);
 
 // ─── Fetch companies from Supabase ────────────────────────────────────────────
 async function fetchCompanies() {
@@ -1305,6 +1397,378 @@ async function confirmImport() {
     </div>
   </div>
 </div>
+
+<!-- ══════════════════════════════════════════════════════════════════════════
+     MODAL: Agregar Cliente Rápido
+════════════════════════════════════════════════════════════════════════════ -->
+<div id="quickadd-modal" class="hidden fixed inset-0 bg-black/70 z-50 flex items-center justify-center p-4">
+  <div class="card rounded-2xl w-full max-w-2xl max-h-[90vh] flex flex-col shadow-2xl">
+
+    <!-- Header -->
+    <div class="flex items-center justify-between p-5 border-b border-slate-700">
+      <div>
+        <h2 class="text-lg font-bold text-white">➕ Agregar Cliente(s) Rápido</h2>
+        <p class="text-xs text-slate-400 mt-0.5">Pega la info básica — el sistema hace el resto</p>
+      </div>
+      <button onclick="closeQuickAdd()" class="text-slate-400 hover:text-white text-2xl leading-none">✕</button>
+    </div>
+
+    <!-- Tabs -->
+    <div class="flex border-b border-slate-700 px-5 pt-3 gap-4">
+      <button id="tab-form" onclick="switchTab('form')"
+              class="text-sm pb-2 border-b-2 border-blue-500 text-blue-400 font-semibold transition">
+        📝 Formulario
+      </button>
+      <button id="tab-paste" onclick="switchTab('paste')"
+              class="text-sm pb-2 border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition">
+        📋 Pegar Lista
+      </button>
+    </div>
+
+    <div class="overflow-y-auto flex-1 p-5 space-y-4">
+
+      <!-- TAB: Formulario individual -->
+      <div id="panel-form">
+        <div class="grid grid-cols-2 gap-3">
+          <div class="col-span-2">
+            <label class="text-xs text-slate-400 block mb-1">Nombre de la empresa *</label>
+            <input id="qa-nombre" type="text" placeholder="Ej: Restaurante La Hacienda"
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Teléfono</label>
+            <input id="qa-tel" type="text" placeholder="809-555-0000"
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Email</label>
+            <input id="qa-email" type="email" placeholder="info@empresa.com"
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Sitio web actual (si tiene)</label>
+            <input id="qa-web" type="text" placeholder="www.empresa.com"
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Municipio</label>
+            <input id="qa-muni" type="text" placeholder="Santo Domingo, Santiago..."
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Sector / Industria</label>
+            <input id="qa-sector" type="text" placeholder="Restaurante, Clínica, Ferretería..."
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div>
+            <label class="text-xs text-slate-400 block mb-1">Empleados aprox.</label>
+            <input id="qa-emp" type="number" placeholder="10"
+                   class="w-full rounded-lg px-3 py-2 text-sm" />
+          </div>
+          <div class="col-span-2">
+            <label class="text-xs text-slate-400 block mb-1">Notas / contexto adicional</label>
+            <textarea id="qa-notas" rows="2" placeholder="Ej: Dueño interesado en rediseño, tiene Facebook pero no web..."
+                      class="w-full rounded-lg px-3 py-2 text-sm resize-none"></textarea>
+          </div>
+        </div>
+        <div id="qa-form-msg" class="text-xs mt-2 hidden"></div>
+      </div>
+
+      <!-- TAB: Pegar lista -->
+      <div id="panel-paste" class="hidden">
+        <p class="text-xs text-slate-400 mb-2">
+          Pega uno por línea. Formato flexible — el sistema detecta nombre, teléfono, email, web y municipio automáticamente.
+        </p>
+        <p class="text-xs text-slate-500 mb-3 bg-slate-800 rounded-lg p-2 font-mono">
+          Ejemplo:<br>
+          Restaurante La Hacienda | 809-555-1234 | lahaci@gmail.com | Santiago<br>
+          Farmacia El Centro, 829-200-0001, www.farmaciaelcentro.com, Santo Domingo<br>
+          Clínica Salud Total 809333444
+        </p>
+        <textarea id="qa-paste" rows="10"
+                  class="w-full rounded-lg px-3 py-2 text-sm font-mono resize-none"
+                  placeholder="Pega aquí la lista de clientes..."></textarea>
+        <div id="qa-parse-preview" class="hidden mt-3">
+          <p class="text-xs text-slate-400 mb-2">Vista previa detectada:</p>
+          <div id="qa-parse-list" class="space-y-1 max-h-48 overflow-y-auto"></div>
+        </div>
+        <button onclick="parsePasteList()"
+                class="mt-3 btn-gray w-full py-2 rounded-lg text-sm text-slate-200 transition">
+          🔍 Analizar Lista
+        </button>
+        <div id="qa-paste-msg" class="text-xs mt-2 hidden"></div>
+      </div>
+
+    </div>
+
+    <!-- Footer -->
+    <div class="p-5 border-t border-slate-700 flex gap-3">
+      <button id="btn-qa-save" onclick="saveQuickClients()"
+              class="btn-green flex-1 py-2.5 rounded-xl text-white font-semibold text-sm transition">
+        💾 Guardar y Encolar para Research
+      </button>
+      <button onclick="closeQuickAdd()" class="btn-gray px-6 py-2.5 rounded-xl text-slate-300 text-sm transition">
+        Cancelar
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Quick Add Clientes ─────────────────────────────────────────────────────────
+
+let qaTab = 'form';
+let parsedClients = [];
+
+function openQuickAdd() {
+  document.getElementById('quickadd-modal').classList.remove('hidden');
+  qaTab = 'form';
+  parsedClients = [];
+  clearQuickForm();
+  document.getElementById('qa-paste').value = '';
+  document.getElementById('qa-parse-preview').classList.add('hidden');
+  hideMsg('qa-form-msg');
+  hideMsg('qa-paste-msg');
+}
+
+function closeQuickAdd() {
+  document.getElementById('quickadd-modal').classList.add('hidden');
+}
+
+function switchTab(tab) {
+  qaTab = tab;
+  const tabs = ['form','paste'];
+  tabs.forEach(t => {
+    document.getElementById('panel-' + t).classList.toggle('hidden', t !== tab);
+    const btn = document.getElementById('tab-' + t);
+    if (t === tab) {
+      btn.classList.add('border-blue-500','text-blue-400','font-semibold');
+      btn.classList.remove('border-transparent','text-slate-400');
+    } else {
+      btn.classList.remove('border-blue-500','text-blue-400','font-semibold');
+      btn.classList.add('border-transparent','text-slate-400');
+    }
+  });
+}
+
+function clearQuickForm() {
+  ['qa-nombre','qa-tel','qa-email','qa-web','qa-muni','qa-sector','qa-emp','qa-notas']
+    .forEach(id => { document.getElementById(id).value = ''; });
+}
+
+function showMsg(id, msg, isError=false) {
+  const el = document.getElementById(id);
+  el.textContent = msg;
+  el.className = 'text-xs mt-2 ' + (isError ? 'text-red-400' : 'text-green-400');
+  el.classList.remove('hidden');
+}
+function hideMsg(id) {
+  document.getElementById(id).classList.add('hidden');
+}
+
+// Detect email, phone, url in a string token
+function detectToken(token) {
+  const t = token.trim();
+  if (/^\S+@\S+\.\S+$/.test(t)) return { email: t };
+  if (/^[\d\s\-\(\)\+]{7,}$/.test(t)) return { tel: t.replace(/\D/g,'') };
+  if (/^(www\.|https?:\/\/)\S+/i.test(t)) return { web: t };
+  return { frag: t };
+}
+
+// Columnas del formato Excel empresas_2.xlsx
+// rnc(0) nombre(1) calle(2) num(3) edif(4) piso(5) apto(6) barrio(7)
+// muni_cod(8) muni_nom(9) tipo(10) tel(11) ext(12) emp(13) sal(14) sec(15)
+const SECTOR_NAMES_QA = {
+  3:'Comercio',5:'Servicios Profesionales',6:'Construcción',7:'Alimentos',
+  8:'Manufactura',9:'Transporte',10:'Turismo',11:'Salud',12:'Educación',
+  14:'Finanzas',15:'Inmobiliaria',16:'Tecnología',18:'Retail',
+  33:'Consultoría',41:'Medios',47:'Comercio General',48:'Servicios'
+};
+
+function parseExcelLine(cols) {
+  const nombre  = (cols[1]||'').trim();
+  // Fila inválida: sin nombre, o nombre parece número (RNC en posición incorrecta)
+  if (!nombre || /^\d+$/.test(nombre) || nombre.length < 3) return null;
+
+  const calle   = (cols[2]||'').trim();
+  const barrio  = (cols[7]||'').trim();
+  const muniNom = (cols[9]||'').trim().toUpperCase();
+  const rnc     = (cols[0]||'').trim();
+  const dir     = [calle, barrio].filter(Boolean).join(', ');
+
+  // Teléfono: tomar solo los primeros 10 dígitos (evita fusiones con ext/salario)
+  const telRaw  = (cols[11]||'').replace(/\D/g,'');
+  const tel     = telRaw.length >= 7 ? telRaw.substring(0, 10) : '';
+
+  // Empleados y salarios: pueden estar corridos si hay columnas extra, buscar el int/float razonable
+  const empRaw  = parseFloat((cols[13]||'0').replace(',','.'));
+  const salRaw  = parseFloat((cols[14]||'0').replace(',','.'));
+  const emp     = empRaw > 0 && empRaw < 100000 ? Math.round(empRaw) : 0;
+  const sal     = salRaw > 0 && salRaw < 999999999 ? salRaw : 0;
+
+  const sec     = parseInt(cols[15]) || 0;
+
+  return {
+    nombre, tel, email: '', web: '',
+    municipio: muniNom || 'NO ESPECIFICADO',
+    sector: SECTOR_NAMES_QA[sec] || (sec ? `Sector-${sec}` : 'Comercio General'),
+    empleados: emp, salarios: sal, rnc, direccion: dir,
+  };
+}
+
+function parseLine(line) {
+  // Detect tab-separated (Excel paste) — must have ≥5 tabs
+  if ((line.match(/\t/g)||[]).length >= 5) {
+    return parseExcelLine(line.split('\t'));
+  }
+
+  // Fallback: | or , separated (manual input)
+  const parts = line.split(/[|,]/).map(s => s.trim()).filter(Boolean);
+  const client = { nombre: '', tel: '', email: '', web: '', municipio: '', sector: '', empleados: 0, notas: '' };
+  let frags = [];
+
+  parts.forEach(p => {
+    const r = detectToken(p);
+    if (r.email)       client.email = r.email;
+    else if (r.tel)    client.tel = r.tel;
+    else if (r.web)    client.web = r.web;
+    else frags.push(r.frag || p.trim());
+  });
+
+  frags = frags.map(f => {
+    const m = f.match(/(\d[\d\s\-]{6,})/);
+    if (m && !client.tel) { client.tel = m[1].replace(/\D/g,''); return f.replace(m[0],'').trim(); }
+    return f;
+  }).filter(Boolean);
+
+  const MUNIS = ['SANTO DOMINGO','SANTIAGO','LA ROMANA','SAN PEDRO','PUERTO PLATA',
+                 'HIGÜEY','SAN FRANCISCO','BARAHONA','MOCA','BONAO','LA VEGA',
+                 'SAN CRISTÓBAL','DISTRITO NACIONAL','D.N.'];
+  frags = frags.map(f => {
+    const up = f.toUpperCase();
+    const found = MUNIS.find(m => up.includes(m));
+    if (found) { client.municipio = f.toUpperCase(); return null; }
+    return f;
+  }).filter(Boolean);
+
+  if (frags.length) client.nombre = frags[0];
+  if (frags.length > 1) client.sector = frags.slice(1).join(' ');
+  return client;
+}
+
+function parsePasteList() {
+  const raw = document.getElementById('qa-paste').value.trim();
+  if (!raw) { showMsg('qa-paste-msg','Pega algo primero.',true); return; }
+
+  const lines = raw.split('\n').map(l=>l.trimEnd()).filter(Boolean);
+  parsedClients = lines.map(parseLine).filter(c => c && c.nombre);
+
+  if (!parsedClients.length) { showMsg('qa-paste-msg','No se detectó ningún cliente válido.',true); return; }
+
+  const list = document.getElementById('qa-parse-list');
+  list.innerHTML = '';
+  parsedClients.forEach((c,i) => {
+    const div = document.createElement('div');
+    div.className = 'bg-slate-800 rounded-lg px-3 py-2 text-xs flex flex-wrap gap-2 items-center';
+    div.innerHTML = `
+      <span class="font-semibold text-white">${c.nombre}</span>
+      ${c.tel ? `<span class="text-slate-400">📞 ${c.tel}</span>` : ''}
+      ${c.email ? `<span class="text-slate-400">✉️ ${c.email}</span>` : ''}
+      ${c.web ? `<span class="text-slate-400">🌐 ${c.web}</span>` : ''}
+      ${c.municipio ? `<span class="text-slate-400">📍 ${c.municipio}</span>` : ''}
+    `;
+    list.appendChild(div);
+  });
+
+  document.getElementById('qa-parse-preview').classList.remove('hidden');
+  showMsg('qa-paste-msg', `✓ ${parsedClients.length} cliente(s) detectados. Revisa y guarda.`);
+}
+
+function buildClientRecord(c) {
+  const slug = (c.nombre||'').toLowerCase().replace(/[^\w]/g,'_').substring(0,35)
+             + '_' + Date.now().toString(36);
+  const emp = parseInt(c.empleados)||0;
+  const sal = parseFloat(c.salarios)||0;
+  return {
+    id:        slug,
+    nombre:    c.nombre,
+    municipio: (c.municipio||'NO ESPECIFICADO').toUpperCase(),
+    sector:    c.sector || 'No especificado',
+    empleados: emp,
+    telefono:  c.tel || '',
+    url:       c.web || '',
+    descripcion: c.notas || '',
+    prioridad: emp >= 20 || sal >= 300000 ? 'ALTA' : 'MEDIA',
+    score:     parseFloat(((emp * 2) + (sal / 1200)).toFixed(2)) || 5,
+    rnc:       c.rnc || '',
+    direccion: c.direccion || '',
+  };
+}
+
+async function saveQuickClients() {
+  const btn = document.getElementById('btn-qa-save');
+  btn.disabled = true;
+  btn.textContent = 'Guardando...';
+
+  let clients = [];
+
+  if (qaTab === 'form') {
+    const nombre = document.getElementById('qa-nombre').value.trim();
+    if (!nombre) {
+      showMsg('qa-form-msg','El nombre es obligatorio.',true);
+      btn.disabled = false; btn.textContent = '💾 Guardar y Encolar para Research';
+      return;
+    }
+    clients = [{
+      nombre,
+      tel:      document.getElementById('qa-tel').value.trim(),
+      email:    document.getElementById('qa-email').value.trim(),
+      web:      document.getElementById('qa-web').value.trim(),
+      municipio:document.getElementById('qa-muni').value.trim(),
+      sector:   document.getElementById('qa-sector').value.trim(),
+      empleados:document.getElementById('qa-emp').value.trim(),
+      notas:    document.getElementById('qa-notas').value.trim(),
+    }];
+  } else {
+    if (!parsedClients.length) {
+      showMsg('qa-paste-msg','Analiza la lista primero.',true);
+      btn.disabled = false; btn.textContent = '💾 Guardar y Encolar para Research';
+      return;
+    }
+    clients = parsedClients;
+  }
+
+  const records = clients.map(buildClientRecord);
+  const msgId = qaTab === 'form' ? 'qa-form-msg' : 'qa-paste-msg';
+
+  // ── Actualización optimista: mostrar en UI de inmediato ──
+  allCompanies.unshift(...records);
+  computeAndRenderStats();
+  applyFilters();
+
+  btn.disabled = false;
+  btn.textContent = '💾 Guardar y Encolar para Research';
+  showMsg(msgId, `✅ ${records.length} cliente(s) agregados. Guardando en segundo plano...`);
+  setTimeout(closeQuickAdd, 900);
+
+  // ── Persistir en Supabase en background (sin bloquear UI) ──
+  (async () => {
+    const { error: errComp } = await supabase.from('companies').insert(records);
+    if (errComp) {
+      console.error('Error guardando companies:', errComp);
+      return;
+    }
+    const queueRows = records.map(r => ({
+      company_id:   r.id,
+      company_name: r.nombre,
+      status:       'pending',
+      progress_pct: 0,
+    }));
+    const { error: errQ } = await supabase.from('research_queue').insert(queueRows);
+    if (errQ) console.warn('Queue insert parcial:', errQ);
+  })();
+}
+</script>
 
 </body>
 </html>

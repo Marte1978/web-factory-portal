@@ -14,14 +14,15 @@ from portal.services.image_collector import get_logo, get_og_image, get_site_pho
 from portal.services.color_extractor import extract_colors
 from portal.services.brief_generator import generate_package
 from portal.services.deep_extractor import deep_extract
-from portal.services.google_maps import enrich_with_maps
+from portal.services.search_engine import buscar_multi, detect_official_url
+from portal.services.scraper import scrape_smart
+from portal.services.maps_engine import get_maps_data
 
 # ─── Import core research functions ───────────────────────────────────────────
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 from scripts.investigar_100 import (
-    buscar, detectar_url, scrape, extraer,
-    score_web, propuesta, tiene_chat, tiene_whatsapp,
+    extraer, score_web, propuesta, tiene_chat, tiene_whatsapp,
     phones_from, emails_from, socials_from,
 )
 
@@ -44,28 +45,30 @@ async def research_company(company: dict, emit: Emitter) -> dict:
 
     await step("start", f"Iniciando investigacion de {nombre}", 3)
 
-    # ── 1. DDG Search ─────────────────────────────────────────────────────────
-    await step("search", "Buscando en DuckDuckGo...", 8)
+    # ── 1. Búsqueda multi-fuente ───────────────────────────────────────────────
+    await step("search", "Buscando en múltiples fuentes (DDG / Google / Bing)...", 8)
     try:
-        results, nombre_limpio = await loop.run_in_executor(None, buscar, nombre)
+        results, nombre_limpio = await loop.run_in_executor(None, buscar_multi, nombre)
+        await step("search", f"{len(results)} resultados encontrados", 11)
     except Exception as e:
         results, nombre_limpio = [], nombre
-        await step("search_warn", f"Busqueda limitada: {e}", 10)
-    await asyncio.sleep(0.3)
+        await step("search_warn", f"Búsqueda limitada: {e}", 10)
+    await asyncio.sleep(0.2)
 
     # ── 2. Find official URL ───────────────────────────────────────────────────
     await step("url", "Detectando sitio web oficial...", 14)
-    url_oficial = detectar_url(results, nombre, nombre_limpio)
+    url_oficial = detect_official_url(results, nombre, nombre_limpio)
     if not url_oficial and company.get("url"):
         url_oficial = company["url"]
     await step("url", f"Web: {url_oficial or 'NO ENCONTRADA'}", 18, {"url": url_oficial})
 
-    # ── 3. Scrape site ────────────────────────────────────────────────────────
+    # ── 3. Scrape inteligente (requests → Playwright) ─────────────────────────
     soup, html, url_final = None, "", url_oficial
     if url_oficial:
-        await step("scrape", "Analizando sitio web...", 22)
+        await step("scrape", "Analizando sitio (con fallback JS si necesario)...", 22)
         try:
-            soup, html, url_final = await loop.run_in_executor(None, scrape, url_oficial)
+            soup, html, url_final = await loop.run_in_executor(None, scrape_smart, url_oficial)
+            await step("scrape", f"Sitio cargado — {len(html):,} chars", 26)
         except Exception as e:
             await step("scrape_warn", f"Error accediendo al sitio: {e}", 25)
 
@@ -113,20 +116,19 @@ async def research_company(company: dict, emit: Emitter) -> dict:
         f"Equipo: {len(deep.get('team', []))}"
     ), 38)
 
-    # ── 6. Google Maps ────────────────────────────────────────────────────────
-    await step("maps", "Buscando en Google Maps...", 42)
+    # ── 6. Google Maps (API → Playwright → snippets) ──────────────────────────
+    await step("maps", "Obteniendo datos de Google Maps...", 42)
     try:
-        maps_data = await loop.run_in_executor(None, enrich_with_maps, {
-            "nombre": nombre,
-            "municipio": company.get("municipio", ""),
-            "direccion": company.get("direccion", ""),
-        })
+        maps_data = await loop.run_in_executor(
+            None, get_maps_data,
+            nombre, company.get("municipio", ""), company.get("direccion", "")
+        )
     except Exception:
-        maps_data = {"maps_url": "", "rating": None, "review_count": None}
+        maps_data = {"maps_url": "", "rating": None, "review_count": None, "hours_text": "", "found": False}
 
     rating_str = f"{maps_data.get('rating', '-')}/5 ({maps_data.get('review_count', 0)} reseñas)" \
                  if maps_data.get("rating") else "no encontrado"
-    await step("maps", f"Google Maps: {rating_str}", 46, {
+    await step("maps", f"Maps: {rating_str}", 46, {
         "maps_found": maps_data.get("found", False),
         "rating": maps_data.get("rating"),
     })

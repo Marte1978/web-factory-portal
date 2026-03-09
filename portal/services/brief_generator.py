@@ -380,9 +380,11 @@ def _build_chatbot(company: dict, content: dict, faq: list,
     ]
 
     if booking.get("has_booking"):
+        booking_url = booking.get("booking_url")
+        booking_text = f"en línea: {booking_url}" if booking_url else "contactándonos directamente por WhatsApp o teléfono"
         base_qa.append({
             "question": "¿Cómo puedo agendar una cita?",
-            "answer": f"Puedes agendar tu cita {f'en línea: {booking[\"booking_url\"]}' if booking.get('booking_url') else 'contactándonos directamente por WhatsApp o teléfono'}.",
+            "answer": f"Puedes agendar tu cita {booking_text}.",
             "category": "citas"
         })
 
