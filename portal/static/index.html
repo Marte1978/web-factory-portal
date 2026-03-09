@@ -504,32 +504,49 @@ function applyFilters() {
 
 // ─── Excel Export ─────────────────────────────────────────────────────────────
 function getFilteredCompanies() {
-  // Returns currently filtered companies (same as what's displayed)
-  return filtered.length > 0 ? filtered : allCompanies;
+  // Devuelve el array filtrado actual visible en la tabla
+  if (typeof filtered !== 'undefined' && filtered.length) return filtered;
+  return allCompanies || [];
 }
 
 function exportToExcel() {
-  const data = getFilteredCompanies();
-  if (!data.length) { alert('No hay empresas para exportar'); return; }
+  const data = getFilteredCompanies ? getFilteredCompanies() : allCompanies;
+  if (!data || !data.length) { showToast('No hay datos para exportar', 'warn'); return; }
 
-  const headers = ['Empresa','Sector','Ciudad','Web','Calidad','Score','Chat IA',
-    'WhatsApp','Maps Rating','Reseñas','Teléfonos','Emails',
-    'Facebook','Instagram','LinkedIn','Es Target','Propuesta'];
-  const rows = data.map(c => [
-    c.nombre, c.sector, c.municipio, c.url, c.calidad_web, c.score_web,
-    c.chat_ia, c.whatsapp, c.gmaps_rating, c.gmaps_reviews,
-    c.telefonos, c.emails, c.facebook, c.instagram, c.linkedin,
-    c.es_target, c.propuesta
-  ]);
+  const headers = [
+    'Empresa','Sector','Ciudad','RNC','Empleados',
+    'Sitio Web','Calidad Web','Score','Chat IA','WhatsApp Web',
+    'Teléfonos','Emails','Dirección',
+    'Maps Rating','Maps Reseñas','Horarios Maps','Link Maps',
+    'Facebook','Instagram','LinkedIn','YouTube','TikTok','WhatsApp Link',
+    'Es Target','Propuesta de Valor','Investigado'
+  ];
+
+  const toRow = c => [
+    c.nombre||'', c.sector||'', c.municipio||'', c.rnc||'', c.empleados||'',
+    c.url||'', c.calidad_web||'', c.score_web||'', c.chat_ia||'', c.whatsapp||'',
+    c.telefonos||'', c.emails||'', c.direccion||'',
+    c.gmaps_rating||'', c.gmaps_reviews||'', c.gmaps_hours||'', c.gmaps_url||'',
+    c.facebook||'', c.instagram||'', c.linkedin||'', c.youtube||'', c.tiktok||'', c.whatsapp_link||'',
+    c.es_target||'', c.propuesta||'', c.researched ? 'SI' : 'NO'
+  ];
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
 
-  // Column widths
-  ws['!cols'] = [35,20,18,30,14,8,9,10,12,12,20,25,25,25,25,10,45].map(w=>({wch:w}));
+  // Hoja 1: todos
+  const ws1 = XLSX.utils.aoa_to_sheet([headers, ...data.map(toRow)]);
+  ws1['!cols'] = [38,20,18,14,10,32,14,8,10,12,22,28,30,12,12,30,28,28,28,28,25,20,20,10,50,10].map(w=>({wch:w}));
+  XLSX.utils.book_append_sheet(wb, ws1, 'Todos');
 
-  XLSX.utils.book_append_sheet(wb, ws, 'Empresas');
-  XLSX.writeFile(wb, `web-factory-reporte-${new Date().toISOString().slice(0,10)}.xlsx`);
+  // Hoja 2: solo targets
+  const targets = data.filter(c => c.es_target === 'SI');
+  const ws2 = XLSX.utils.aoa_to_sheet([headers, ...targets.map(toRow)]);
+  ws2['!cols'] = ws1['!cols'];
+  XLSX.utils.book_append_sheet(wb, ws2, 'Targets');
+
+  const date = new Date().toISOString().slice(0,10);
+  XLSX.writeFile(wb, `web-factory-reporte-${date}.xlsx`);
+  showToast(`Excel exportado: ${data.length} empresas, ${targets.length} targets`, 'success');
 }
 
 // ─── Views ────────────────────────────────────────────────────────────────────

@@ -16,32 +16,41 @@ from portal.services.search_engine import get_headers, random_delay, _BASURA
 # ─── Estrategia 0: Apify Google Places Actor ─────────────────────────────────
 
 def _apify_maps(nombre: str, municipio: str) -> Dict:
+    """Usa Apify Google Maps Scraper — más confiable que Playwright."""
     api_token = os.getenv("APIFY_API_TOKEN", "")
-    if not api_token:
-        return {}
     try:
-        from apify_client import ApifyClient
-        client = ApifyClient(api_token)
-
+        import requests as _req
         city = municipio.replace("DISTRITO NACIONAL", "Santo Domingo").title()
         clean = re.sub(r"\b(S\.?A\.?S?|SRL|EIRL|LTD|INC|CORP)\b", "", nombre, flags=re.IGNORECASE).strip()
         query = f"{clean} {city} Dominican Republic"
 
-        run = client.actor("compass/crawler-google-places").call(run_input={
-            "searchStringsArray": [query],
-            "language": "es",
-            "maxCrawledPlacesPerSearch": 3,
-            "includeReviews": False,
-        }, timeout_secs=60)
+        # Run actor synchronously (waits for result, max 60s)
+        run_resp = _req.post(
+            "https://api.apify.com/v2/acts/compass~crawler-google-places/run-sync-get-dataset-items",
+            params={"token": api_token, "timeout": 55, "memory": 256},
+            json={
+                "searchStringsArray": [query],
+                "language": "es",
+                "maxCrawledPlacesPerSearch": 3,
+                "includeReviews": False,
+                "scrapeReviewsPersonalData": False,
+            },
+            timeout=65,
+        )
 
-        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        if run_resp.status_code not in (200, 201):
+            return {}
+
+        items = run_resp.json()
         if not items:
             return {}
 
         place = items[0]
+
+        # Build hours text
         hours_parts = []
         for day in (place.get("openingHours") or []):
-            hours_parts.append(f"{day.get('day','')} {day.get('hours','')}")
+            hours_parts.append(f"{day.get('day','')}: {day.get('hours','')}")
 
         return {
             "rating":       place.get("totalScore"),
@@ -50,9 +59,10 @@ def _apify_maps(nombre: str, municipio: str) -> Dict:
             "hours_text":   " | ".join(hours_parts)[:300],
             "address":      place.get("address", ""),
             "phone":        place.get("phone", ""),
+            "website":      place.get("website", ""),
             "found":        True,
         }
-    except Exception:
+    except Exception as e:
         return {}
 
 
