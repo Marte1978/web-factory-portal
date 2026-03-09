@@ -1,18 +1,7 @@
 {
   "version": 2,
-  "builds": [
-    {
-      "src": "portal/app.py",
-      "use": "@vercel/python"
-    }
-  ],
+  "outputDirectory": "portal/static",
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "portal/app.py"
-    }
-  ],
-  "env": {
-    "VERCEL": "1"
-  }
+    { "src": "/(.*)", "dest": "/$1" }
+  ]
 }
