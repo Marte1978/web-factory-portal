@@ -1,6 +1,7 @@
 """
-Google Maps data enrichment — tres estrategias:
-  1. Google Places API (si hay API key)
+Google Maps data enrichment — cuatro estrategias:
+  0. Apify Google Places Actor (si hay APIFY_API_TOKEN)
+  1. Google Places API (si hay GOOGLE_MAPS_API_KEY)
   2. Scraping directo de ficha de Maps con Playwright
   3. DDG/Bing snippets como fallback
 """
@@ -10,6 +11,49 @@ import time
 import requests
 from typing import Dict
 from portal.services.search_engine import get_headers, random_delay, _BASURA
+
+
+# ─── Estrategia 0: Apify Google Places Actor ─────────────────────────────────
+
+def _apify_maps(nombre: str, municipio: str) -> Dict:
+    api_token = os.getenv("APIFY_API_TOKEN", "")
+    if not api_token:
+        return {}
+    try:
+        from apify_client import ApifyClient
+        client = ApifyClient(api_token)
+
+        city = municipio.replace("DISTRITO NACIONAL", "Santo Domingo").title()
+        clean = re.sub(r"\b(S\.?A\.?S?|SRL|EIRL|LTD|INC|CORP)\b", "", nombre, flags=re.IGNORECASE).strip()
+        query = f"{clean} {city} Dominican Republic"
+
+        run = client.actor("compass/crawler-google-places").call(run_input={
+            "searchStringsArray": [query],
+            "language": "es",
+            "maxCrawledPlacesPerSearch": 3,
+            "includeReviews": False,
+        }, timeout_secs=60)
+
+        items = list(client.dataset(run["defaultDatasetId"]).iterate_items())
+        if not items:
+            return {}
+
+        place = items[0]
+        hours_parts = []
+        for day in (place.get("openingHours") or []):
+            hours_parts.append(f"{day.get('day','')} {day.get('hours','')}")
+
+        return {
+            "rating":       place.get("totalScore"),
+            "review_count": place.get("reviewsCount"),
+            "maps_url":     place.get("url", ""),
+            "hours_text":   " | ".join(hours_parts)[:300],
+            "address":      place.get("address", ""),
+            "phone":        place.get("phone", ""),
+            "found":        True,
+        }
+    except Exception:
+        return {}
 
 
 # ─── Estrategia 1: Google Places API ─────────────────────────────────────────
@@ -187,6 +231,11 @@ def get_maps_data(nombre: str, municipio: str, direccion: str = "") -> Dict:
 
     base = {"maps_url": fallback_url, "rating": None, "review_count": None,
             "hours_text": "", "address": direccion, "found": False}
+
+    # 0. Apify si hay token
+    apify_data = _apify_maps(nombre, municipio)
+    if apify_data.get("rating") or apify_data.get("found"):
+        return {**base, **apify_data}
 
     # 1. API si hay key
     api_data = _places_api(nombre, municipio)

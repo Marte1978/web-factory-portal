@@ -74,6 +74,10 @@
       <button onclick="openImport()" class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
         📊 Importar Excel
       </button>
+      <button onclick="exportToExcel()" id="btn-export"
+              class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
+        📥 Exportar Excel
+      </button>
       <button onclick="researchAll()" id="btn-all"
               class="btn-green text-sm px-4 py-1.5 rounded-lg text-white font-semibold transition">
         ⚡ Investigar Todos
@@ -496,6 +500,36 @@ function applyFilters() {
 
   document.getElementById('result-count').textContent = `${filtered.length} empresas`;
   renderView();
+}
+
+// ─── Excel Export ─────────────────────────────────────────────────────────────
+function getFilteredCompanies() {
+  // Returns currently filtered companies (same as what's displayed)
+  return filtered.length > 0 ? filtered : allCompanies;
+}
+
+function exportToExcel() {
+  const data = getFilteredCompanies();
+  if (!data.length) { alert('No hay empresas para exportar'); return; }
+
+  const headers = ['Empresa','Sector','Ciudad','Web','Calidad','Score','Chat IA',
+    'WhatsApp','Maps Rating','Reseñas','Teléfonos','Emails',
+    'Facebook','Instagram','LinkedIn','Es Target','Propuesta'];
+  const rows = data.map(c => [
+    c.nombre, c.sector, c.municipio, c.url, c.calidad_web, c.score_web,
+    c.chat_ia, c.whatsapp, c.gmaps_rating, c.gmaps_reviews,
+    c.telefonos, c.emails, c.facebook, c.instagram, c.linkedin,
+    c.es_target, c.propuesta
+  ]);
+
+  const wb = XLSX.utils.book_new();
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+
+  // Column widths
+  ws['!cols'] = [35,20,18,30,14,8,9,10,12,12,20,25,25,25,25,10,45].map(w=>({wch:w}));
+
+  XLSX.utils.book_append_sheet(wb, ws, 'Empresas');
+  XLSX.writeFile(wb, `web-factory-reporte-${new Date().toISOString().slice(0,10)}.xlsx`);
 }
 
 // ─── Views ────────────────────────────────────────────────────────────────────

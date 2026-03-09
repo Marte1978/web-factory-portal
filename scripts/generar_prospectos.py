@@ -23,8 +23,7 @@ EXCEL_IN  = r"C:\Users\Willy\Downloads\empresas_2.xlsx"
 EXCEL_OUT = r"C:\Users\Willy\OneDrive\Escritorio\PROSPECTOS_SD_WILLY.xlsx"
 
 SUPABASE_URL = os.getenv("NEXT_PUBLIC_SUPABASE_URL", "https://fmjvktaaxsdhukbkefnw.supabase.co")
-SERVICE_KEY  = os.getenv("SUPABASE_SERVICE_ROLE_KEY",
-    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZtanZrdGFheHNkaHVrYmtlZm53Iiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3Mjk5MTMyNCwiZXhwIjoyMDg4NTY3MzI0fQ.bcRkFjlI52ZmOtFSeIaaqB84qV9Tk_Cf1SiMnVm7sBE")
+SERVICE_KEY  = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
 
 SUPABASE_HEADERS = {
     "apikey":        SERVICE_KEY,

@@ -51,7 +51,29 @@ portal/services/__pycache__/
 portal/routers/__pycache__/
 scripts/__pycache__/
 
-# Secrets
+# Secrets — never commit credentials
 .env
 .env.local
 .env.production
+.env.*.local
+.env.staging
+.env.test
+.vercel/
+.vercel/project.json
+.vercel/README.txt
+
+# Credentials & tokens (extra safety net)
+*_credentials.json
+*_service_account.json
+secrets.json
+secrets.yaml
+secrets.yml
+*.pem
+*.key
+*.p12
+*.pfx
+
+# API key files
+.apify_token
+.openai_key
+.anthropic_key
