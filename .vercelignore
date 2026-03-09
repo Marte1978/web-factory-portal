@@ -1,0 +1,15 @@
+packages/
+scripts/
+portal/services/
+mcp-server/
+research/
+transcripts/
+content/
+*.py
+*.md
+*.xlsx
+*.json
+!vercel.json
+node_modules/
+__pycache__/
+.git/

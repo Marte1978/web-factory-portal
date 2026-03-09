@@ -1,7 +1,10 @@
 {
   "version": 2,
-  "outputDirectory": "portal/static",
+  "builds": [
+    { "src": "portal/static/**", "use": "@vercel/static" }
+  ],
   "routes": [
-    { "src": "/(.*)", "dest": "/$1" }
+    { "src": "/(.*)", "dest": "/portal/static/$1" },
+    { "src": "/", "dest": "/portal/static/index.html" }
   ]
 }
