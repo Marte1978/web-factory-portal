@@ -78,6 +78,10 @@
               class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
         📥 Exportar Excel
       </button>
+      <button onclick="toggleSelectMode()" id="btn-select"
+              class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition">
+        ☑ Seleccionar
+      </button>
       <button onclick="researchAll()" id="btn-all"
               class="btn-green text-sm px-4 py-1.5 rounded-lg text-white font-semibold transition">
         ⚡ Investigar Todos
@@ -85,6 +89,24 @@
     </div>
   </div>
 </header>
+
+<!-- SELECTION TOOLBAR (aparece cuando hay seleccionadas) -->
+<div id="selection-toolbar" class="hidden sticky top-0 z-40 px-6 py-3 flex items-center gap-4"
+     style="background:#1e3a5f; border-bottom:1px solid #2B5EA7">
+  <span id="sel-count" class="text-white font-bold text-sm">0 seleccionadas</span>
+  <button onclick="researchSelected()"
+          class="btn-green text-sm px-4 py-1.5 rounded-lg text-white font-semibold">
+    🔍 Investigar seleccionadas
+  </button>
+  <button onclick="clearSelection()"
+          class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-300">
+    ✕ Cancelar selección
+  </button>
+  <button onclick="selectAllFiltered()"
+          class="btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-300">
+    Seleccionar todas las visibles
+  </button>
+</div>
 
 <!-- STATS BAR -->
 <div class="max-w-screen-2xl mx-auto px-4 py-4">
@@ -631,6 +653,9 @@ function makeCard(c) {
     <!-- Top row -->
     <div class="flex items-start justify-between gap-2">
       <div class="flex items-center gap-2">
+        <!-- Checkbox selección -->
+        <input type="checkbox" id="chk-${c.id}" class="company-checkbox hidden w-4 h-4 rounded cursor-pointer accent-blue-500"
+               onchange="onCheckboxChange('${c.id}', this.checked)" onclick="event.stopPropagation()">
         ${logoHtml}
         <div class="w-10 h-10 rounded-lg flex items-center justify-center text-lg font-bold text-slate-300"
              style="background:#1e3a8a; display:${c.package_ready ? 'none' : 'flex'}">
@@ -1115,6 +1140,99 @@ function downloadPkg(cid) {
   if (!company) return;
   const slug = toSlug(company.nombre);
   window.open(storageUrl(slug, 'package.zip'), '_blank');
+}
+
+// ─── Selección múltiple ───────────────────────────────────────────────────────
+let selectedIds = new Set();
+let selectMode  = false;
+
+function toggleSelectMode() {
+  selectMode = !selectMode;
+  const btn = document.getElementById('btn-select');
+  btn.textContent = selectMode ? '✕ Salir selección' : '☑ Seleccionar';
+  btn.className   = selectMode
+    ? 'btn-primary text-sm px-3 py-1.5 rounded-lg text-white transition'
+    : 'btn-gray text-sm px-3 py-1.5 rounded-lg text-slate-200 transition';
+  // Mostrar/ocultar checkboxes
+  document.querySelectorAll('.company-checkbox').forEach(cb => {
+    cb.classList.toggle('hidden', !selectMode);
+  });
+  if (!selectMode) clearSelection();
+}
+
+function onCheckboxChange(id, checked) {
+  if (checked) selectedIds.add(id);
+  else         selectedIds.delete(id);
+  updateSelectionToolbar();
+}
+
+function updateSelectionToolbar() {
+  const toolbar = document.getElementById('selection-toolbar');
+  const count   = selectedIds.size;
+  document.getElementById('sel-count').textContent = `${count} empresa${count !== 1 ? 's' : ''} seleccionada${count !== 1 ? 's' : ''}`;
+  toolbar.classList.toggle('hidden', count === 0);
+}
+
+function clearSelection() {
+  selectedIds.clear();
+  document.querySelectorAll('.company-checkbox').forEach(cb => cb.checked = false);
+  updateSelectionToolbar();
+  if (selectMode) toggleSelectMode();
+}
+
+function selectAllFiltered() {
+  const visible = getFilteredCompanies().filter(c => !c.researched);
+  visible.forEach(c => {
+    selectedIds.add(c.id);
+    const cb = document.getElementById(`chk-${c.id}`);
+    if (cb) cb.checked = true;
+  });
+  updateSelectionToolbar();
+}
+
+async function researchSelected() {
+  if (selectedIds.size === 0) return;
+  const ids = [...selectedIds];
+  const companies = allCompanies.filter(c => ids.includes(c.id));
+
+  if (!confirm(`Encolar ${companies.length} empresa(s) para investigación. ¿Continuar?`)) return;
+
+  document.getElementById('batch-modal').classList.remove('hidden');
+  document.getElementById('batch-total').textContent   = companies.length;
+  document.getElementById('batch-current').textContent = '0';
+  const batchLog = document.getElementById('batch-log');
+  batchLog.innerHTML = '';
+
+  let enqueued = 0;
+  for (const company of companies) {
+    try {
+      const { error } = await supabase.from('research_queue').insert({
+        company_id  : company.id,
+        company_name: company.nombre,
+        status      : 'pending',
+        progress_pct: 0,
+        progress_msg: 'En cola...',
+      });
+      if (!error) {
+        enqueued++;
+        document.getElementById('batch-current').textContent = enqueued;
+        document.getElementById('batch-bar').style.width =
+          Math.round((enqueued / companies.length) * 100) + '%';
+        const p = document.createElement('p');
+        p.className   = 'text-slate-300 text-xs';
+        p.textContent = `✓ ${company.nombre}`;
+        batchLog.appendChild(p);
+        batchLog.scrollTop = batchLog.scrollHeight;
+      }
+    } catch (_) {}
+  }
+
+  const done = document.createElement('p');
+  done.className   = 'text-green-400 font-bold mt-2';
+  done.textContent = `✓ ${enqueued} empresas encoladas. El daemon las procesará en orden.`;
+  batchLog.appendChild(done);
+
+  clearSelection();
 }
 
 // ─── Research All (batch enqueue) ─────────────────────────────────────────────
