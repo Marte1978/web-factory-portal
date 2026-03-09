@@ -171,6 +171,7 @@
           <th class="py-2 px-3">Emp.</th>
           <th class="py-2 px-3">Web</th>
           <th class="py-2 px-3">Chat</th>
+          <th class="py-2 px-3">Maps</th>
           <th class="py-2 px-3">Target</th>
           <th class="py-2 px-3">Teléfono</th>
           <th class="py-2 px-3">Acciones</th>
@@ -650,8 +651,17 @@ function makeCard(c) {
     <div class="text-xs text-slate-400 space-y-0.5">
       <p>📂 ${c.sector || '—'}</p>
       <p>📍 ${c.municipio || '—'} &bull; 👥 ${c.empleados || '—'} emp</p>
-      ${c.telefono ? `<p>📞 ${c.telefono}</p>` : ''}
+      ${c.telefonos ? `<p>📞 ${c.telefonos}</p>` : c.telefono ? `<p>📞 ${c.telefono}</p>` : ''}
       ${urlHtml}
+      ${c.gmaps_rating ? `<p class="${c.gmaps_rating >= 4 ? 'text-green-400' : 'text-yellow-400'}">⭐ ${c.gmaps_rating}/5 ${c.gmaps_reviews ? `(${c.gmaps_reviews} reseñas)` : ''}</p>` : ''}
+    </div>
+
+    <!-- Social quick links -->
+    <div class="flex gap-1.5 flex-wrap">
+      ${c.facebook  ? `<a href="${c.facebook}"  target="_blank" class="text-xs text-blue-400 hover:underline">FB</a>` : ''}
+      ${c.instagram ? `<a href="${c.instagram}" target="_blank" class="text-xs text-pink-400 hover:underline">IG</a>` : ''}
+      ${c.whatsapp_link ? `<a href="${c.whatsapp_link}" target="_blank" class="text-xs text-green-400 hover:underline">WA</a>` : ''}
+      ${c.linkedin  ? `<a href="${c.linkedin}"  target="_blank" class="text-xs text-sky-400 hover:underline">LI</a>` : ''}
     </div>
 
     <!-- Proposal snippet -->
@@ -696,8 +706,9 @@ function renderTable() {
       <td class="py-2 px-3 text-xs text-center">${c.empleados || ''}</td>
       <td class="py-2 px-3">${calBadge(c.calidad_web)}</td>
       <td class="py-2 px-3 text-xs text-center ${c.chat_ia === 'SI' ? 'text-green-400' : 'text-red-400'}">${c.chat_ia || '?'}</td>
+      <td class="py-2 px-3 text-xs text-center ${c.gmaps_rating >= 4 ? 'text-green-400' : c.gmaps_rating ? 'text-yellow-400' : 'text-slate-600'}">${c.gmaps_rating ? `⭐${c.gmaps_rating}` : '—'}</td>
       <td class="py-2 px-3">${targetBadge(c.es_target)}</td>
-      <td class="py-2 px-3 text-xs text-slate-400">${c.telefono || ''}</td>
+      <td class="py-2 px-3 text-xs text-slate-400">${c.telefonos || c.telefono || ''}</td>
       <td class="py-2 px-3">
         <button onclick="openDrawer('${c.id}')"
                 class="btn-primary text-xs px-3 py-1 rounded-lg text-white transition">
@@ -720,19 +731,91 @@ async function openDrawer(cid) {
   // Reset tabs
   showTab('research');
 
-  // Company info panel
+  // Company info panel — full OSINT display
+  const c = activeCompany;
   const info = document.getElementById('company-info');
+  const mapsStars = c.gmaps_rating ? '⭐'.repeat(Math.round(c.gmaps_rating)) : '';
+  const mapsColor = c.gmaps_rating >= 4 ? 'text-green-400' : c.gmaps_rating >= 3 ? 'text-yellow-400' : 'text-red-400';
   info.innerHTML = `
-    <div class="grid grid-cols-2 gap-2 text-xs">
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Calidad Web</span><br>${calBadge(activeCompany.calidad_web)}</div>
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Target</span><br>${targetBadge(activeCompany.es_target)}</div>
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Empleados</span><br><span class="text-white font-semibold">${activeCompany.empleados || '—'}</span></div>
-      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Chat IA</span><br><span class="${activeCompany.chat_ia === 'SI' ? 'text-green-400' : 'text-red-400'} font-semibold">${activeCompany.chat_ia || '?'}</span></div>
+    <!-- STATUS GRID -->
+    <div class="grid grid-cols-2 gap-2 text-xs mb-3">
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Calidad Web</span><br>${calBadge(c.calidad_web)}</div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Target</span><br>${targetBadge(c.es_target)}</div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Score Web</span><br><span class="text-white font-bold text-sm">${c.score_web || '—'}/8</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Empleados</span><br><span class="text-white font-semibold">${c.empleados || '—'}</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">Chat IA</span><br><span class="${c.chat_ia === 'SI' ? 'text-green-400' : 'text-red-400'} font-semibold">${c.chat_ia || '?'}</span></div>
+      <div class="bg-slate-800 rounded-lg p-2"><span class="text-slate-400">WhatsApp</span><br><span class="${c.whatsapp === 'SI' ? 'text-green-400' : 'text-red-400'} font-semibold">${c.whatsapp || '?'}</span></div>
     </div>
-    ${activeCompany.telefonos ? `<p class="text-xs text-slate-300">📞 ${activeCompany.telefonos}</p>` : ''}
-    ${activeCompany.emails    ? `<p class="text-xs text-slate-300">✉️ ${activeCompany.emails}</p>`    : ''}
-    ${activeCompany.url       ? `<p class="text-xs"><a href="${activeCompany.url}" target="_blank" class="text-blue-400 hover:underline truncate block">🌐 ${activeCompany.url}</a></p>` : ''}
-    ${activeCompany.propuesta ? `<div class="bg-slate-800 rounded-lg p-2 text-xs text-slate-300 italic">${activeCompany.propuesta}</div>` : ''}
+
+    <!-- GOOGLE MAPS -->
+    ${c.gmaps_rating ? `
+    <div class="bg-slate-800 rounded-lg p-3 mb-3">
+      <div class="flex items-center justify-between mb-1">
+        <span class="text-slate-400 text-xs font-semibold">📍 GOOGLE MAPS</span>
+        ${c.gmaps_url ? `<a href="${c.gmaps_url}" target="_blank" class="text-blue-400 text-xs hover:underline">Ver en Maps →</a>` : ''}
+      </div>
+      <div class="flex items-center gap-2 mb-1">
+        <span class="${mapsColor} font-bold text-lg">${c.gmaps_rating}</span>
+        <span class="text-yellow-400 text-sm">${mapsStars}</span>
+        ${c.gmaps_reviews ? `<span class="text-slate-400 text-xs">(${c.gmaps_reviews} reseñas)</span>` : ''}
+      </div>
+      ${c.gmaps_hours ? `<p class="text-xs text-slate-400 leading-relaxed">${c.gmaps_hours.replace(/\|/g,'<br>')}</p>` : ''}
+    </div>` : c.gmaps_url ? `
+    <div class="bg-slate-800 rounded-lg p-2 mb-3">
+      <a href="${c.gmaps_url}" target="_blank" class="text-blue-400 text-xs hover:underline">📍 Ver en Google Maps →</a>
+    </div>` : ''}
+
+    <!-- CONTACTO -->
+    <div class="bg-slate-800 rounded-lg p-3 mb-3 space-y-1.5">
+      <p class="text-slate-400 text-xs font-semibold mb-2">📞 CONTACTO</p>
+      ${c.telefonos ? `<p class="text-xs text-slate-200">📞 ${c.telefonos}</p>` : c.telefono ? `<p class="text-xs text-slate-200">📞 ${c.telefono}</p>` : ''}
+      ${c.emails    ? `<p class="text-xs text-slate-200">✉️ ${c.emails}</p>` : ''}
+      ${c.direccion ? `<p class="text-xs text-slate-400">📌 ${c.direccion}</p>` : ''}
+      ${c.whatsapp_link ? `<a href="${c.whatsapp_link}" target="_blank" class="text-green-400 text-xs hover:underline block">💬 Abrir WhatsApp →</a>` : ''}
+    </div>
+
+    <!-- WEB -->
+    ${c.url ? `
+    <div class="bg-slate-800 rounded-lg p-2 mb-3">
+      <p class="text-slate-400 text-xs font-semibold mb-1">🌐 SITIO WEB</p>
+      <a href="${c.url}" target="_blank" class="text-blue-400 text-xs hover:underline break-all">${c.url}</a>
+      ${c.titulo_web ? `<p class="text-slate-400 text-xs mt-1 italic">"${c.titulo_web}"</p>` : ''}
+    </div>` : ''}
+
+    <!-- DESCRIPCIÓN -->
+    ${c.descripcion ? `
+    <div class="bg-slate-800 rounded-lg p-2 mb-3">
+      <p class="text-slate-400 text-xs font-semibold mb-1">ℹ️ DESCRIPCIÓN</p>
+      <p class="text-xs text-slate-300 leading-relaxed">${c.descripcion.substring(0,300)}${c.descripcion.length > 300 ? '...' : ''}</p>
+    </div>` : ''}
+
+    <!-- PROPUESTA -->
+    ${c.propuesta ? `
+    <div class="bg-blue-900/40 border border-blue-700/30 rounded-lg p-2 mb-3">
+      <p class="text-blue-300 text-xs font-semibold mb-1">💡 OPORTUNIDAD DE VENTA</p>
+      <p class="text-xs text-slate-300 italic">${c.propuesta}</p>
+    </div>` : ''}
+
+    <!-- REDES SOCIALES -->
+    ${[c.facebook, c.instagram, c.linkedin, c.youtube, c.tiktok, c.twitter].some(Boolean) ? `
+    <div class="bg-slate-800 rounded-lg p-2 mb-3">
+      <p class="text-slate-400 text-xs font-semibold mb-2">📱 REDES SOCIALES</p>
+      <div class="flex flex-wrap gap-2">
+        ${c.facebook  ? `<a href="${c.facebook}"  target="_blank" class="text-xs bg-blue-900/50  text-blue-300  px-2 py-1 rounded-lg hover:opacity-80">Facebook</a>` : ''}
+        ${c.instagram ? `<a href="${c.instagram}" target="_blank" class="text-xs bg-pink-900/50  text-pink-300  px-2 py-1 rounded-lg hover:opacity-80">Instagram</a>` : ''}
+        ${c.linkedin  ? `<a href="${c.linkedin}"  target="_blank" class="text-xs bg-sky-900/50   text-sky-300   px-2 py-1 rounded-lg hover:opacity-80">LinkedIn</a>` : ''}
+        ${c.youtube   ? `<a href="${c.youtube}"   target="_blank" class="text-xs bg-red-900/50   text-red-300   px-2 py-1 rounded-lg hover:opacity-80">YouTube</a>` : ''}
+        ${c.tiktok    ? `<a href="${c.tiktok}"    target="_blank" class="text-xs bg-slate-700    text-slate-200 px-2 py-1 rounded-lg hover:opacity-80">TikTok</a>` : ''}
+        ${c.twitter   ? `<a href="${c.twitter}"   target="_blank" class="text-xs bg-slate-700    text-slate-200 px-2 py-1 rounded-lg hover:opacity-80">X/Twitter</a>` : ''}
+      </div>
+    </div>` : ''}
+
+    <!-- META -->
+    <div class="text-xs text-slate-600 text-center">
+      ${c.research_date ? `Investigado: ${new Date(c.research_date).toLocaleDateString('es')}` : ''}
+      ${c.photo_count ? ` · ${c.photo_count} fotos` : ''}
+      ${c.rnc ? ` · RNC: ${c.rnc}` : ''}
+    </div>
   `;
 
   // Log reset
