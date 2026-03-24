@@ -73,7 +73,7 @@ ${competitor_gaps}
 ## Conclusión
 **Recomendación:** ${recommendation}
 `;
-    const filepath = saveFile("research", filename);
+    const filepath = saveFile("research", filename, content);
     return {
       content: [
         {
@@ -154,8 +154,7 @@ server.tool(
     const header = deal_value ? `> **Deal potencial:** ${deal_value}\n\n` : "";
     const content = `${header}${proposal_content}`;
 
-    const filepath = saveFile("proposals", filename);
-    fs.writeFileSync(path.join(BASE_DIR, "proposals", filename), content, "utf-8");
+    const filepath = saveFile("proposals", filename, content);
 
     return {
       content: [
@@ -189,8 +188,7 @@ server.tool(
 
 ${content}
 `;
-    const filepath = saveFile("content", filename);
-    fs.writeFileSync(path.join(BASE_DIR, "content", filename), fileContent, "utf-8");
+    const filepath = saveFile("content", filename, fileContent);
 
     return {
       content: [

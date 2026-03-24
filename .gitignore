@@ -77,3 +77,9 @@ secrets.yml
 .apify_token
 .openai_key
 .anthropic_key
+.mcp.json
+
+# Proyectos separados (tienen sus propios repos)
+Awesome-AI-Agents/
+ai-os/
+lista-prospectos-69k-rd/

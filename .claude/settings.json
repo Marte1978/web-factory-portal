@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "business-machine": {
+      "command": "node",
+      "args": ["mcp-server/index.js"],
+      "env": {
+        "BUSINESS_DIR": "C:\\Users\\Willy\\sistema de egocios"
+      }
+    },
+    "nexus-ai-os": {
+      "command": "python",
+      "args": ["ai-os/tools/fastmcp_server.py"],
+      "env": {
+        "PYTHONPATH": "C:\\Users\\Willy\\sistema de egocios\\ai-os"
+      }
+    }
+  }
+}
