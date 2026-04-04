@@ -79,6 +79,9 @@ secrets.yml
 .anthropic_key
 .mcp.json
 
+# Claude context privado
+.claude/context.json
+
 # Proyectos separados (tienen sus propios repos)
 Awesome-AI-Agents/
 ai-os/
